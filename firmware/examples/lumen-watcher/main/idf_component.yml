@@ -1,0 +1,20 @@
+## Lumen dependency list. The BSP fails to mark esp_lvgl_port / sscma_client /
+## esp_io_expander as public deps despite exposing them in its header, so we
+## declare them directly. esp_jpeg_simd decodes the Himax preview frames.
+dependencies:
+  idf: ">=5.2"
+
+  sensecap-watcher:
+    override_path: "../../../components/sensecap-watcher"
+
+  esp_io_expander_pca95xx_16bit:
+    override_path: "../../../components/esp_io_expander_pca95xx_16bit"
+
+  espressif/esp_lvgl_port:
+    override_path: "../../../components/esp_lvgl_port"
+
+  sscma_client:
+    override_path: "../../../components/sscma_client"
+
+  esp_jpeg_simd:
+    override_path: "../../../components/esp_jpeg_simd"

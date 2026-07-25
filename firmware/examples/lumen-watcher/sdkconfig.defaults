@@ -1,0 +1,96 @@
+# Lumen — sdkconfig defaults for SenseCAP Watcher (ESP32-S3, 32MB flash, 8MB octal PSRAM)
+
+CONFIG_IDF_TARGET="esp32s3"
+
+# ---- Flash / PSRAM (matches stock hardware config) ----
+CONFIG_ESPTOOLPY_FLASHSIZE_32MB=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=1024
+CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=262144
+
+# ---- CPU / compiler: the two cheapest speed wins ----
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+# Stock builds default to -Og. -O2 alone is a measurable LVGL render speedup.
+CONFIG_COMPILER_OPTIMIZATION_PERF=y
+CONFIG_BOOTLOADER_COMPILER_OPTIMIZATION_PERF=y
+
+# ---- Partitions ----
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# ---- LVGL ----
+# Required by the SPD2010 QSPI panel byte order
+CONFIG_LV_COLOR_16_SWAP=y
+CONFIG_LV_MEM_SIZE_KILOBYTES=96
+# QR widget for the Wi-Fi provisioning screen
+CONFIG_LV_USE_QRCODE=y
+# One small built-in font kept as LVGL's default/fallback (symbols etc.).
+# All UI text uses the generated Space Grotesk / IBM Plex Mono fonts.
+CONFIG_LV_FONT_MONTSERRAT_14=y
+CONFIG_LV_FONT_DEFAULT_MONTSERRAT_14=y
+# Uncomment while profiling:
+# CONFIG_LV_USE_PERF_MONITOR=y
+
+# ---- Deliberately ABSENT vs stock (the bloat) ----
+# No CONFIG_BT_*            -> BLE stack never built or resident
+# No esp-sr / wakenet       -> no always-on audio front-end eating a core
+# No MQTT/TLS defaults      -> nothing phones home
+# (These are simply not enabled; nothing to configure.)
+
+# ---- Misc ----
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=6144
+CONFIG_FREERTOS_HZ=1000
+
+# ---- Display transport (mirrors stock factory firmware; BSP defaults fail) ----
+# depth MUST stay 1: this SPD2010's chunked QSPI can't overlap
+# transactions (depth 2 = the v0.1 white-screen bug / v0.34 boot loop).
+# The audio-vs-flush collision is handled by halving refresh rate
+# during voice playback instead (scr_idle).
+CONFIG_BSP_LCD_PANEL_SPI_TRANS_Q_DEPTH=1
+CONFIG_BSP_LCD_SPI_DMA_SIZE_DIV=16
+CONFIG_LVGL_PORT_TASK_PRIORITY=11
+CONFIG_LVGL_PORT_TASK_AFFINITY_CPU1=y
+# v0.24: stack must be INTERNAL — flash writes disable cache, and a
+# PSRAM stack fails esp_task_stack_is_sane_cache_disabled() -> the
+# Sound/Display/BT tap panic that haunted v0.7-v0.23.
+CONFIG_LVGL_PORT_TASK_STACK_ALLOC_EXTERNAL=n
+CONFIG_LVGL_PORT_TASK_MAX_SLEEP_MS=5
+
+# ---- v0.3 performance ----
+# LVGL renders on CPU1; keep the Himax event/JPEG-decode task on CPU0
+CONFIG_SSCMA_PROCESS_TASK_AFFINITY_CPU0=y
+# 15ms display refresh for smoother arcs/animations (default 30)
+CONFIG_LV_DISP_DEF_REFR_PERIOD=15
+
+# ---- v0.5: screen mirror (LVGL framebuffer snapshot) ----
+CONFIG_LV_USE_SNAPSHOT=y
+
+# ---- v0.7.1: modern browsers send >512B of headers; ESP default rejects them ----
+CONFIG_HTTPD_MAX_REQ_HDR_LEN=2048
+CONFIG_HTTPD_MAX_URI_LEN=1024
+
+# ---- v0.10: Himax event task stack at factory parity (BSP default 4K overflows) ----
+CONFIG_SSCMA_PROCESS_TASK_STACK_SIZE=10240
+
+# ---- v0.13: factory LVGL memory model + task-state introspection ----
+CONFIG_LV_MEM_CUSTOM=y
+CONFIG_LV_MEM_BUF_MAX_NUM=32
+CONFIG_LV_IMG_CACHE_DEF_SIZE=1
+CONFIG_FREERTOS_USE_TRACE_FACILITY=y
+
+# ---- v0.15: BLE (NimBLE peripheral) ----
+CONFIG_BT_ENABLED=y
+CONFIG_BT_NIMBLE_ENABLED=y
+CONFIG_BT_NIMBLE_MAX_CONNECTIONS=1
+CONFIG_BT_NIMBLE_ROLE_CENTRAL=n
+CONFIG_BT_NIMBLE_ROLE_OBSERVER=n
+
+# ---- v0.16: corruption traps — crash AT the corruptor, not the victim ----
+CONFIG_HEAP_POISONING_COMPREHENSIVE=y
+CONFIG_COMPILER_STACK_CHECK_MODE_STRONG=y
+CONFIG_LVGL_DRAW_BUFF_HEIGHT=40
+CONFIG_LWIP_TCP_SND_BUF_DEFAULT=17280
+CONFIG_LWIP_TCP_WND_DEFAULT=17280

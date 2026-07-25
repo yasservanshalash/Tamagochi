@@ -1,0 +1,17 @@
+# Lumen partition table — IDENTICAL layout to stock factory firmware.
+# nvsfactory (device EUI / SenseCraft credentials) lives at 0x9000 and is
+# never written by this project. Keeping the exact stock layout means:
+#   * your factory data survives,
+#   * stock firmware can be restored by re-flashing Seeed's bins at the
+#     documented addresses (0x0 / 0x8000 / 0x10d000 / 0x110000 / 0x1910000 / 0x1a10000),
+#   * `idf.py flash` drops the Lumen app into ota_0 (0x110000), same slot stock uses.
+#
+# Name,     Type, SubType, Offset, Size,   Flags
+nvsfactory, data, nvs,     ,       200K,
+nvs,        data, nvs,     ,       840K,
+otadata,    data, ota,     ,       0x2000,
+phy_init,   data, phy,     ,       0x1000,
+ota_0,      app,  ota_0,   ,       12M,
+ota_1,      app,  ota_1,   ,       12M,
+model,      data, spiffs,  ,       1024K,
+storage,    data, spiffs,  ,       6080K,
