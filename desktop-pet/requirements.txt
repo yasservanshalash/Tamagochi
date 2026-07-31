@@ -1,0 +1,5 @@
+PySide6>=6.6
+sounddevice>=0.4.6
+numpy>=1.26
+Pillow>=10.0
+httpx>=0.27

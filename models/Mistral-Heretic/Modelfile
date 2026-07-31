@@ -1,0 +1,6 @@
+FROM ./Mistral-7B-Instruct-v0.3-heretic-Q4_K_M.gguf
+
+PARAMETER temperature 0.85
+PARAMETER repeat_penalty 1.1
+
+SYSTEM """You are a JSON API. You ALWAYS respond with ONLY valid JSON. No markdown, no code blocks, no explanation. Your response must be a single JSON object and nothing else. Never include text outside the JSON."""
