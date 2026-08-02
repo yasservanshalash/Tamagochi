@@ -73,6 +73,22 @@ _live = {}                              # token -> pending text (single use)
 # Free tier Orpheus: ~10 RPM / 100 RPD (Whisper STT is the 20 RPM one).
 GROQ_KEY = os.environ.get("GROQ_API_KEY", "")
 GROQ_TTS = "https://api.groq.com/openai/v1/audio/speech"
+
+# The cloud voice is any OpenAI-compatible /v1/audio/speech endpoint, not Groq
+# specifically. Groq's free tier caps Orpheus at 3,600 characters a day and its
+# paid upgrade is currently closed, so being able to point this somewhere else
+# without touching code is the difference between having a voice and not.
+#
+# Orpheus is Apache 2.0, so the *same model* is hosted elsewhere — DeepInfra
+# runs canopylabs/orpheus-3b-0.1-ft at $7/1M characters against Groq's $22.
+# Anything speaking the OpenAI shape works: OpenAI, DeepInfra, Deepgram, Azure.
+#
+#   PET_TTS_URL=https://api.deepinfra.com/v1/openai/audio/speech
+#   PET_TTS_KEY=<their key>
+#   PET_GROQ_TTS_MODEL=canopylabs/orpheus-3b-0.1-ft
+#   PET_GROQ_TTS_VOICE=dan
+TTS_URL = os.environ.get("PET_TTS_URL", GROQ_TTS)
+TTS_KEY = os.environ.get("PET_TTS_KEY", "") or GROQ_KEY
 GROQ_TTS_MODEL = os.environ.get("PET_GROQ_TTS_MODEL",
                                 "canopylabs/orpheus-v1-english")
 GROQ_TTS_VOICE = os.environ.get("PET_GROQ_TTS_VOICE", "troy")
@@ -125,7 +141,7 @@ def _synth_kokoro(s: str) -> bytes:
     return pcm
 
 def _has_tts() -> bool:
-    if GROQ_KEY:
+    if TTS_KEY:
         return True
     return (_kokoro is not None) or (
         PIPER_VOICE and Path(PIPER_VOICE).exists())
@@ -189,8 +205,8 @@ def _synth_groq(s: str) -> bytes:
                 time.sleep(min(wait_gap, max_wait))
             try:
                 r = httpx.post(
-                    GROQ_TTS,
-                    headers={"Authorization": f"Bearer {GROQ_KEY}",
+                    TTS_URL,
+                    headers={"Authorization": f"Bearer {TTS_KEY}",
                              "Content-Type": "application/json"},
                     json={"model": GROQ_TTS_MODEL, "voice": GROQ_TTS_VOICE,
                           "input": s, "response_format": "wav"},
@@ -642,7 +658,7 @@ def _synth_one(s: str) -> bytes:
     # The free tier is 3,600 TTS tokens a day, roughly 90-120 lines, so "out of
     # allowance" is a thing that happens on an ordinary evening rather than an
     # exotic failure.
-    if GROQ_KEY:
+    if TTS_KEY:
         try:
             pcm = _synth_groq(s)
             if pcm:
