@@ -75,7 +75,10 @@ impl deskfolk_render_win::Host for CompanionHost {
         let devices = audio::list_devices(&settings);
 
         vec![
-            MenuEntry::item("talk", "Talk to him").with_icon(Icon::Mic),
+            // The shortcut is in the label because a global hotkey nobody
+            // knows about is a hotkey nobody uses.
+            MenuEntry::item("talk", format!("Talk to him    {}", hotkey_label()))
+                .with_icon(Icon::Mic),
             MenuEntry::check("wake_word", "Answers to his name", settings.wake)
                 .with_icon(Icon::Wake),
             MenuEntry::Separator,
@@ -136,13 +139,8 @@ impl deskfolk_render_win::Host for CompanionHost {
         // One click is the whole interaction: he opens his ear, you talk, and
         // he answers when you stop. Say nothing and it stays a poke — which is
         // why there is no separate "send" and no mode to get stuck in.
-        if self.ear.is_enabled() {
-            let hour = local_hour();
-            self.rt.lock().engine.begin_listening();
-            if self.ear.listen(hour) {
-                return;
-            }
-            self.rt.lock().engine.stop_listening();
+        if self.start_listening() {
+            return;
         }
 
         let _ = self.rt.lock().engine.play_emotion("happy", 0, 0);
@@ -159,8 +157,46 @@ impl deskfolk_render_win::Host for CompanionHost {
         on_menu(&self.app, id);
     }
 
+    fn on_hotkey(&self) {
+        // Same as clicking him, but from wherever you happen to be — so
+        // talking to him does not first require finding him on screen.
+        tracing::info!("hotkey: opening his ear");
+        self.start_listening();
+    }
+
     fn on_moved(&self, x: i32, y: i32) {
         tracing::debug!("companion moved to ({x}, {y})");
+    }
+}
+
+impl CompanionHost {
+    /// Open his ear for one turn. `false` if there is no microphone to open,
+    /// so the caller can fall back to treating it as a plain poke.
+    fn start_listening(&self) -> bool {
+        if !self.ear.is_enabled() {
+            return false;
+        }
+        if self.ear.is_listening() {
+            // Already open: a second press means "never mind".
+            self.ear.cancel();
+            self.rt.lock().engine.stop_listening();
+            return true;
+        }
+        self.voice.stop();
+        let hour = local_hour();
+        {
+            let mut rt = self.rt.lock();
+            rt.engine.touch();
+            if rt.engine.is_asleep() {
+                rt.engine.soft_wake();
+            }
+            rt.engine.begin_listening();
+        }
+        if self.ear.listen(hour) {
+            return true;
+        }
+        self.rt.lock().engine.stop_listening();
+        false
     }
 }
 
@@ -372,6 +408,7 @@ fn boot_companion(app: &AppHandle) -> anyhow::Result<()> {
             portal,
             on_desktop,
             pixel_snap,
+            hotkey: hotkey_spec(),
         },
         host,
     )
@@ -617,4 +654,35 @@ fn open_control_center(app: &AppHandle) {
 fn local_hour() -> u8 {
     use chrono::Timelike;
     chrono::Local::now().hour() as u8
+}
+
+/// The chord that starts him listening, or `None` to register nothing.
+///
+/// Ctrl+Alt+Y by default: three keys deep enough that nothing else claims it,
+/// and the letter is his. `DESKFOLK_HOTKEY=off` turns it off.
+fn hotkey_spec() -> Option<String> {
+    match std::env::var("DESKFOLK_HOTKEY") {
+        Ok(v) if matches!(v.as_str(), "off" | "0" | "false" | "none") => None,
+        Ok(v) if !v.trim().is_empty() => Some(v.trim().to_string()),
+        _ => Some("ctrl+alt+y".to_string()),
+    }
+}
+
+/// How to write that chord on a menu row.
+fn hotkey_label() -> String {
+    hotkey_spec()
+        .map(|s| {
+            s.split('+')
+                .map(|p| {
+                    let p = p.trim();
+                    let mut c = p.chars();
+                    match c.next() {
+                        Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+                        None => String::new(),
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("+")
+        })
+        .unwrap_or_default()
 }

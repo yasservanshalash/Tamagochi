@@ -39,6 +39,8 @@ pub mod canvas;
 mod desktop;
 #[cfg(windows)]
 mod flyout;
+#[cfg(windows)]
+mod hotkey;
 /// Pure data — no Win32 — so the menu a host describes typechecks everywhere.
 mod menu;
 #[cfg(windows)]
@@ -96,6 +98,9 @@ pub struct Config {
     /// Round the scale so one art pixel is a whole number of screen pixels.
     /// Off means arbitrary sizes and a visibly ragged silhouette.
     pub pixel_snap: bool,
+    /// A system-wide chord like `ctrl+alt+y` that starts him listening from
+    /// inside whatever you are working in. `None` registers nothing.
+    pub hotkey: Option<String>,
 }
 
 /// What the window needs from the application.
@@ -107,6 +112,8 @@ pub trait Host: Send + Sync + 'static {
     fn menu(&self) -> Vec<MenuEntry>;
     fn on_click(&self);
     fn on_menu(&self, id: &str);
+    /// The global hotkey was pressed, from wherever the user happened to be.
+    fn on_hotkey(&self) {}
     /// He was dragged somewhere new, in screen pixels.
     fn on_moved(&self, _x: i32, _y: i32) {}
 }

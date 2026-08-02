@@ -33,12 +33,13 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     SetWindowLongPtrW, SetWindowPos, ShowWindow, SystemParametersInfoW, TranslateMessage,
     GWLP_USERDATA, HWND_TOPMOST, IDC_ARROW, MA_NOACTIVATE, MSG, SPI_GETWORKAREA, SWP_NOACTIVATE,
     SWP_NOMOVE, SWP_NOSIZE, SW_HIDE, SW_SHOWNOACTIVATE, WM_APP, WM_CLOSE, WM_DESTROY,
-    WM_DISPLAYCHANGE, WM_DPICHANGED, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEACTIVATE, WM_MOUSEMOVE,
-    WM_RBUTTONUP, WNDCLASSW, WS_EX_LAYERED, WS_EX_NOREDIRECTIONBITMAP, WS_EX_TOOLWINDOW,
-    WS_EX_TOPMOST, WS_POPUP,
+    WM_DISPLAYCHANGE, WM_DPICHANGED, WM_HOTKEY, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEACTIVATE,
+    WM_MOUSEMOVE, WM_RBUTTONUP, WNDCLASSW, WS_EX_LAYERED, WS_EX_NOREDIRECTIONBITMAP,
+    WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
 
 use crate::flyout;
+use crate::hotkey;
 use crate::paint;
 use crate::sprites::Sprites;
 use crate::surface::Surface;
@@ -227,6 +228,11 @@ pub(crate) fn spawn(
                     return;
                 }
             };
+            // Claimed on this thread, because WM_HOTKEY is delivered to the
+            // queue of whoever registered it.
+            if let Some(spec) = config.hotkey.as_deref() {
+                unsafe { hotkey::register(hwnd, spec) };
+            }
 
             let mut state = Box::new(WindowState {
                 shared: thread_shared,
@@ -432,6 +438,13 @@ unsafe extern "system" fn wndproc(
             return 0;
         }
 
+        WM_HOTKEY => {
+            if let Some(state) = state_of(hwnd) {
+                state.shared.host.on_hotkey();
+            }
+            return 0;
+        }
+
         WM_DPICHANGED | WM_DISPLAYCHANGE => {
             if let Some(state) = state_of(hwnd) {
                 state.resize_for_dpi(hwnd);
@@ -451,6 +464,7 @@ unsafe extern "system" fn wndproc(
         }
 
         WM_DESTROY => {
+            hotkey::unregister(hwnd);
             let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut WindowState;
             if !ptr.is_null() {
                 SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);

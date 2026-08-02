@@ -80,6 +80,7 @@ cd ui;  npm install;  npm run dev      # only if you open the Control Center
 | `DESKFOLK_VOICE` | on | `off` for a silent companion — subtitles only. |
 | `DESKFOLK_VOICE_URL` | brain / `PET_BRAIN` | Where speech is synthesised. |
 | `DESKFOLK_VOICE_SELF_TALK` | off | `1` also speaks his idle muttering. Costs quota — see below. |
+| `DESKFOLK_HOTKEY` | `ctrl+alt+y` | System-wide key that starts him listening. `off` for none. |
 
 ### The mind
 
@@ -294,6 +295,23 @@ everything else. If the reply carries `action: listen`, the engine reopens his
 ear once he has finished speaking, so it becomes a back-and-forth rather than a
 series of one-shots. The engine only emits `OpenMic` after he stops talking,
 which is what stops him recording himself.
+
+### Or press the key
+
+**Ctrl+Alt+Y** starts him listening from inside whatever you are working in.
+Clicking him means finding him first — behind a window, on the other monitor,
+under the thing you are actually doing — and that is enough friction to stop
+you bothering. Press it again to change your mind.
+
+`DESKFOLK_HOTKEY=ctrl+shift+space` picks a different chord; `off` registers
+none. A bare letter is refused on purpose, since claiming one globally would
+eat that key in every application on the machine; bare function keys are the
+conventional exception and are allowed.
+
+It uses `RegisterHotKey` rather than a keyboard hook, so the OS delivers that
+one chord and nothing in this process ever sees your other keystrokes. A
+companion that installs a global key logger to hear "talk to me" would be a
+poor trade.
 
 ### Or say his name
 
