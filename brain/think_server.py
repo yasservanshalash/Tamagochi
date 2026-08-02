@@ -79,9 +79,24 @@ GROQ_TTS_VOICE = os.environ.get("PET_GROQ_TTS_VOICE", "troy")
 # Stay under Orpheus RPM so we never 429 into a different voice.
 ORPHEUS_RPM = float(os.environ.get("PET_ORPHEUS_RPM", "9"))  # < free 10
 ORPHEUS_MIN_GAP = 60.0 / max(1.0, ORPHEUS_RPM)
-# Default OFF — Kokoro is a different voice; user hates the switch.
-# Set PET_TTS_FALLBACK=1 only if you want local voice when Orpheus is dead.
-TTS_FALLBACK = os.environ.get("PET_TTS_FALLBACK", "0") == "1"
+# What to do when Orpheus cannot deliver. Kokoro is a different voice and the
+# switch is jarring, so the default is still silence — but "quota" exists
+# because the free tier is 3,600 TTS tokens a day (~90-120 lines), and running
+# out mid-evening is ordinary rather than exotic.
+#   off (default) | quota (only when out of allowance) | on (any failure)
+_fb = os.environ.get("PET_TTS_FALLBACK", "off").strip().lower()
+TTS_FALLBACK_MODE = {
+    "0": "off", "": "off", "off": "off", "false": "off", "none": "off",
+    "1": "on", "on": "on", "true": "on", "always": "on",
+    "quota": "quota", "limit": "quota", "auto": "quota",
+}.get(_fb, "off")
+class OrpheusOutOfQuota(RuntimeError):
+    """Orpheus has no allowance left — waiting will not help.
+
+    Distinct from a passing 429 so the retry loop lets it out immediately and
+    the caller can choose the local voice rather than silence.
+    """
+
 _orpheus_lock = __import__("threading").Lock()
 _orpheus_next_ok = 0.0
 
@@ -201,7 +216,11 @@ def _synth_groq(s: str) -> bytes:
                     should_retry = r.headers.get("x-should-retry", "").lower() != "false"
                     if not should_retry or wait > max_wait * 2:
                         print(f"groq orpheus 429 — not retrying: {detail}")
-                        raise RuntimeError(f"429 Too Many Requests ({detail})")
+                        # Its own type, so the retry handler below lets it out
+                        # rather than treating it as another 429 to sit through
+                        # — and so the caller can tell "out of allowance" from
+                        # "briefly unwell" and pick a fallback accordingly.
+                        raise OrpheusOutOfQuota(detail)
                     # Groq often lies with huge Retry-After; cap it and stay
                     # on Orpheus — do NOT change voice.
                     wait = min(max_wait, max(ORPHEUS_MIN_GAP, wait))
@@ -227,6 +246,8 @@ def _synth_groq(s: str) -> bytes:
                 print(f"tts via orpheus ({GROQ_TTS_VOICE}): {len(pcm)} B "
                       f"for {s[:40]!r}")
                 return pcm
+            except OrpheusOutOfQuota:
+                raise
             except Exception as e:
                 if isinstance(e, RuntimeError) and "429" in str(e):
                     continue
@@ -581,16 +602,8 @@ def tts_file(fname: str):
         return {"err": "bad name"}
     return FileResponse(TTS_DIR / fname, media_type="audio/wav")
 
-def _synth_one(s: str) -> bytes:
-    # Orpheus only by default — never switch to Kokoro (different voice).
-    # PET_TTS_FALLBACK=1 re-enables local voice if you explicitly want it.
-    if GROQ_KEY:
-        pcm = _synth_groq(s)
-        if pcm:
-            return pcm
-        raise RuntimeError("orpheus returned empty")
-    if not TTS_FALLBACK:
-        raise RuntimeError("no Orpheus key and fallback disabled")
+def _synth_local(s: str) -> bytes:
+    """Kokoro, then Piper. Local, free, and not the Orpheus voice."""
     try:
         return _synth_kokoro(s)
     except Exception as e:
@@ -606,6 +619,48 @@ def _synth_one(s: str) -> bytes:
          "-i", "pipe:0", "-f", "s16le", "-ar", "16000",
          "-ac", "1", "pipe:1"],
         input=s16, timeout=30, capture_output=True, check=True).stdout
+
+
+def _is_quota_error(e: Exception) -> bool:
+    """Is this Orpheus being out of allowance, rather than briefly unwell?"""
+    if isinstance(e, OrpheusOutOfQuota):
+        return True
+    t = str(e).lower()
+    return "429" in t or "rate limit" in t or "quota" in t
+
+
+def _synth_one(s: str) -> bytes:
+    # Orpheus first, always: it is the voice this character has.
+    #
+    # PET_TTS_FALLBACK decides what happens when it cannot deliver:
+    #   off   (default) — silence. He says the line in text only.
+    #   quota           — local voice *only* when Orpheus is out of allowance,
+    #                     so a heavy day ends in a different voice rather than
+    #                     in silence, and a transient blip still stays quiet.
+    #   on              — local voice on any Orpheus failure.
+    #
+    # The free tier is 3,600 TTS tokens a day, roughly 90-120 lines, so "out of
+    # allowance" is a thing that happens on an ordinary evening rather than an
+    # exotic failure.
+    if GROQ_KEY:
+        try:
+            pcm = _synth_groq(s)
+            if pcm:
+                return pcm
+            err = RuntimeError("orpheus returned empty")
+        except Exception as e:
+            err = e
+        if TTS_FALLBACK_MODE == "off":
+            raise err
+        if TTS_FALLBACK_MODE == "quota" and not _is_quota_error(err):
+            raise err
+        print(f"orpheus unavailable, using the local voice for this line: "
+              f"{str(err)[:120]}")
+        return _synth_local(s)
+
+    if TTS_FALLBACK_MODE == "off":
+        raise RuntimeError("no Orpheus key and fallback disabled")
+    return _synth_local(s)
 
 def _tts_wav_stream(text: str, who: str = "tts_live"):
     """Sentence-streamed WAV-shaped PCM16 @16k. Shared by every voice route."""
@@ -690,9 +745,13 @@ def stt_preload():
         print("MODE: KEEP IT REAL (creator gets full answers; strangers get bounced)")
     if GROQ_KEY:
         print(f"STT: Groq cloud ({GROQ_MODEL}) for converse; wake uses local")
+        _fb_says = {
+            "off": "OFF — orpheus or silence",
+            "quota": "local voice only when orpheus is out of allowance",
+            "on": "local voice on any orpheus failure",
+        }[TTS_FALLBACK_MODE]
         print(f"TTS: Groq Orpheus ({GROQ_TTS_MODEL}, voice={GROQ_TTS_VOICE}, "
-              f"≤{ORPHEUS_RPM:.0f} RPM, fallback="
-              f"{'on' if TTS_FALLBACK else 'OFF — orpheus only'})")
+              f"≤{ORPHEUS_RPM:.0f} RPM, fallback={_fb_says})")
     elif STT_URL:
         print(f"STT: whisper-cpp server {STT_URL}")
     # Preload local whisper for /pet/wake so name-spotting doesn't burn
