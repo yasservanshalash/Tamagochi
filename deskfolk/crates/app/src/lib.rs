@@ -76,6 +76,8 @@ impl deskfolk_render_win::Host for CompanionHost {
 
         vec![
             MenuEntry::item("talk", "Talk to him").with_icon(Icon::Mic),
+            MenuEntry::check("wake_word", "Answers to his name", settings.wake)
+                .with_icon(Icon::Wake),
             MenuEntry::Separator,
             device_submenu(
                 "Microphone",
@@ -309,11 +311,16 @@ fn boot_companion(app: &AppHandle) -> anyhow::Result<()> {
         let rt = rt.clone();
         Arc::new(move || rt.lock().engine.stop_listening()) as Arc<dyn Fn() + Send + Sync>
     };
+    // He heard his name: put his ear up straight away, so the listening ring
+    // appears while the rest of the sentence is still arriving.
+    let on_wake = {
+        let rt = rt.clone();
+        Arc::new(move || rt.lock().engine.begin_listening()) as Arc<dyn Fn() + Send + Sync>
+    };
     let ear = Arc::new(Ear::new(
         config::resolve_voice(),
         audio_settings.clone(),
-        on_reply,
-        on_idle,
+        ear::Ears { on_reply, on_idle, on_wake },
     ));
 
     app.manage(AppState {
@@ -520,6 +527,22 @@ fn on_menu(app: &AppHandle, id: &str) {
     match id {
         "quit" => app.exit(0),
         "center" => open_control_center(app),
+        "wake_word" => {
+            if let Some(state) = app.try_state::<AppState>() {
+                let on = {
+                    let mut s = state.audio.lock();
+                    s.wake = !s.wake;
+                    s.wake
+                };
+                state.ear.set_wake(on);
+                audio::save_settings(app, &state.audio.lock());
+                tracing::info!(
+                    "name-spotting {} — the microphone is {} while he is awake",
+                    if on { "on" } else { "off" },
+                    if on { "held open" } else { "closed" }
+                );
+            }
+        }
         "sleep" => {
             if let Some(state) = app.try_state::<AppState>() {
                 state.voice.stop();

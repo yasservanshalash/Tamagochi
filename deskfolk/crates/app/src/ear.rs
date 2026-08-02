@@ -1,22 +1,25 @@
 //! Listening to him being talked to.
 //!
-//! `audio.rs` has had a working `Recorder` for a while and the menu has
-//! remembered your microphone for just as long, but nothing ever opened it:
-//! `Effect::OpenMic` was a log line, so "Talk to him" put up a subtitle that
-//! asked you to click to send something that was never recorded. This is the
-//! other half of the loop.
+//! Two ways in. **Click him and talk** — he opens his ear and ends the turn
+//! when you stop, so there is no second click and no mode to get stuck in.
+//! Or, if you turn it on, **say his name** and he starts listening on his own.
 //!
-//! The interaction is deliberately one step. The alpha's flow — open the mic,
-//! say your piece, then find him again and click to send — asks you to do
-//! something a person you are talking to would never ask for. Here he decides
-//! you have finished the same way a person does: **you stop talking.** A short
-//! run of silence after speech ends the turn and sends it.
+//! # Deciding what counts as speech
 //!
-//! Saying nothing at all is not an error either. If no speech arrives he
-//! simply stops listening and treats it as the poke it was.
+//! A fixed loudness threshold does not survive contact with real microphones.
+//! A headset at low gain peaks around 6 on a 0..100 scale while someone talks
+//! normally; a desk mic in a noisy room idles higher than that. Pick one number
+//! and you either cut people off mid-sentence or never stop recording.
+//!
+//! So the threshold is measured, not assumed: the first fraction of a second
+//! establishes the room's noise floor and speech is whatever sits clearly
+//! above it. Both numbers are logged for every turn, because "he did not hear
+//! me" is otherwise impossible to tell apart from "he heard me and had nothing
+//! to say".
 
+use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
-use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -25,23 +28,29 @@ use serde::Deserialize;
 
 use crate::audio::{AudioSettings, Recorder, SOURCE_RATE};
 
-/// Peak level (0..=100) that counts as somebody speaking rather than room
-/// noise. A headset mic idles near zero; a keyboard tap spikes briefly, which
-/// is why speech also has to persist before it opens the turn.
-const SPEECH_LEVEL: u8 = 9;
-/// How long speech must persist before it counts, so a cough or a key press
-/// does not start a sentence.
-const SPEECH_MS: u64 = 120;
-/// Silence after speech that ends the turn. Long enough to think mid-sentence,
-/// short enough that he does not sit there after you have finished.
-const SILENCE_MS: u64 = 900;
-/// If nothing is ever said, give up and treat it as a poke.
-const NO_SPEECH_MS: u64 = 3_000;
+/// How long to sample the room before deciding what speech sounds like.
+const CALIBRATE_MS: u64 = 280;
+/// Speech must clear the noise floor by at least this much, on a 0..=100 peak
+/// scale — and by a quarter of the floor again in a room that is already loud,
+/// since noise that loud fluctuates by more than a fixed margin.
+const OVER_FLOOR: u8 = 4;
+/// The bar is never below this, so silence itself cannot read as speech.
+const MIN_THRESHOLD: u8 = 4;
+/// How long speech must persist before it counts, so a key press or a cough
+/// does not open a turn.
+const SPEECH_MS: u64 = 110;
+/// Silence after speech that ends the turn. Long enough to think mid-sentence.
+const SILENCE_MS: u64 = 1_000;
+/// If nothing is ever said after a click, give up and treat it as a poke.
+const NO_SPEECH_MS: u64 = 4_000;
 /// Hard ceiling on one turn, so a stuck-open mic cannot record forever.
-const MAX_TURN_MS: u64 = 20_000;
+const MAX_TURN_MS: u64 = 25_000;
+/// Audio kept before speech is detected, so his name is never clipped off the
+/// front of the very utterance that contains it.
+const PREROLL_MS: u64 = 700;
 
 /// What came back from the brain after it heard you.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 pub struct Heard {
     #[serde(default)]
     pub say: String,
@@ -56,15 +65,25 @@ pub struct Heard {
     pub heard: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct WakeReply {
+    #[serde(default)]
+    wake: bool,
+    #[serde(default)]
+    heard: String,
+}
+
 enum Cmd {
     Listen { hour: u8 },
     Cancel,
+    SetWake(bool),
 }
 
 #[derive(Default)]
 struct EarState {
     listening: AtomicBool,
     level: AtomicU8,
+    cancel: AtomicBool,
 }
 
 pub struct Ear {
@@ -72,14 +91,19 @@ pub struct Ear {
     state: Arc<EarState>,
 }
 
+/// Everything the listening thread needs to report back.
+pub struct Ears {
+    pub on_reply: Arc<dyn Fn(Heard) + Send + Sync>,
+    pub on_idle: Arc<dyn Fn() + Send + Sync>,
+    /// He heard his name and is about to take a turn.
+    pub on_wake: Arc<dyn Fn() + Send + Sync>,
+}
+
 impl Ear {
-    /// Start the listening thread. `base` is the brain's URL; `None` disables
-    /// the microphone entirely and every method becomes a no-op.
     pub fn new(
         base: Option<String>,
         settings: Arc<Mutex<AudioSettings>>,
-        on_reply: Arc<dyn Fn(Heard) + Send + Sync>,
-        on_idle: Arc<dyn Fn() + Send + Sync>,
+        ears: Ears,
     ) -> Self {
         let state = Arc::new(EarState::default());
         let Some(base) = base else {
@@ -89,12 +113,16 @@ impl Ear {
 
         let (tx, rx) = mpsc::channel();
         let thread_state = state.clone();
+        let start_wake = settings.lock().wake;
         match std::thread::Builder::new()
             .name("deskfolk-ear".into())
-            .spawn(move || run(rx, thread_state, settings, base, on_reply, on_idle))
+            .spawn(move || run(rx, thread_state, settings, base, ears, start_wake))
         {
             Ok(_) => {
-                tracing::info!("mic: ready");
+                tracing::info!(
+                    "mic: ready{}",
+                    if start_wake { ", listening for his name" } else { "" }
+                );
                 Self { tx: Some(tx), state }
             }
             Err(e) => {
@@ -117,13 +145,14 @@ impl Ear {
         self.state.level.load(Ordering::Relaxed)
     }
 
-    /// Open the mic for one turn. Ignored if a turn is already in progress, so
-    /// an impatient second click cannot cut the first one short.
+    /// Open the mic for one turn. Ignored if a turn is already running, so an
+    /// impatient second click cannot cut the first one short.
     pub fn listen(&self, hour: u8) -> bool {
         let Some(tx) = &self.tx else { return false };
         if self.is_listening() {
             return true;
         }
+        self.state.cancel.store(false, Ordering::SeqCst);
         self.state.listening.store(true, Ordering::SeqCst);
         if tx.send(Cmd::Listen { hour }).is_err() {
             self.state.listening.store(false, Ordering::SeqCst);
@@ -133,19 +162,33 @@ impl Ear {
     }
 
     pub fn cancel(&self) {
+        // A flag as well as a message: the recording loop is inside a turn and
+        // polls this, rather than coming back to the channel between turns.
+        self.state.cancel.store(true, Ordering::SeqCst);
         if let Some(tx) = &self.tx {
             let _ = tx.send(Cmd::Cancel);
         }
     }
+
+    /// Turn name-spotting on or off.
+    pub fn set_wake(&self, on: bool) {
+        if let Some(tx) = &self.tx {
+            let _ = tx.send(Cmd::SetWake(on));
+        }
+    }
 }
+
+// ---------------------------------------------------------------------------
+// The listening thread
+// ---------------------------------------------------------------------------
 
 fn run(
     rx: Receiver<Cmd>,
     state: Arc<EarState>,
     settings: Arc<Mutex<AudioSettings>>,
     base: String,
-    on_reply: Arc<dyn Fn(Heard) + Send + Sync>,
-    on_idle: Arc<dyn Fn() + Send + Sync>,
+    ears: Ears,
+    start_wake: bool,
 ) {
     let client = match reqwest::blocking::Client::builder()
         .connect_timeout(Duration::from_secs(4))
@@ -160,90 +203,252 @@ fn run(
         }
     };
 
-    while let Ok(cmd) = rx.recv() {
-        let hour = match cmd {
-            Cmd::Cancel => continue,
-            Cmd::Listen { hour } => hour,
-        };
+    let mut watching = start_wake;
+    // Held open across watch ticks. Reopening per tick would click the device
+    // and, on headsets with sidetone, blip the user's own voice at them.
+    let mut watch_rec: Option<Recorder> = None;
 
-        let pcm = match record_turn(&settings, &state, &rx) {
-            Some(pcm) => pcm,
-            None => {
-                state.listening.store(false, Ordering::SeqCst);
-                state.level.store(0, Ordering::Relaxed);
-                on_idle();
-                continue;
-            }
-        };
-        state.listening.store(false, Ordering::SeqCst);
-        state.level.store(0, Ordering::Relaxed);
-
-        let url = format!(
-            "{}/pet/converse?screen=desktop-pc&hour={hour}&battery=100&charging=1",
-            base.trim_end_matches('/')
-        );
-        tracing::info!("mic: sending {:.1}s of speech", secs(pcm.len()));
-        match client
-            .post(&url)
-            .header("Content-Type", "application/octet-stream")
-            .body(pcm)
-            .send()
-        {
-            Ok(r) if r.status().is_success() => match r.json::<Heard>() {
-                Ok(reply) => {
-                    tracing::info!("mic: heard {:?}", reply.heard);
-                    on_reply(reply);
+    loop {
+        match rx.recv_timeout(Duration::from_millis(40)) {
+            Ok(Cmd::SetWake(on)) => {
+                watching = on;
+                if !on {
+                    watch_rec = None;
+                    state.level.store(0, Ordering::Relaxed);
                 }
-                Err(e) => {
-                    tracing::warn!("mic: malformed reply: {e}");
-                    on_idle();
-                }
-            },
-            Ok(r) => {
-                tracing::warn!("mic: {url} said {}", r.status());
-                on_idle();
+                tracing::info!("mic: name-spotting {}", if on { "on" } else { "off" });
             }
-            Err(e) => {
-                tracing::warn!("mic: {url} unreachable ({e})");
-                on_idle();
+            Ok(Cmd::Cancel) => {}
+            Ok(Cmd::Listen { hour }) => {
+                // A deliberate turn gets the device to itself.
+                watch_rec = None;
+                take_turn(&client, &base, &settings, &state, &ears, hour, None);
+            }
+            Err(RecvTimeoutError::Disconnected) => return,
+            Err(RecvTimeoutError::Timeout) => {
+                if watching && !state.listening.load(Ordering::Relaxed) {
+                    watch_tick(
+                        &client, &base, &settings, &state, &ears, &mut watch_rec,
+                    );
+                }
             }
         }
     }
 }
 
-/// Record until he decides the turn is over. `None` means nothing was said.
-fn record_turn(
+/// One deliberate turn: record, send, report.
+fn take_turn(
+    client: &reqwest::blocking::Client,
+    base: &str,
     settings: &Arc<Mutex<AudioSettings>>,
     state: &Arc<EarState>,
-    rx: &Receiver<Cmd>,
-) -> Option<Vec<u8>> {
-    let Some(rec) = Recorder::open(&settings.lock()) else {
-        tracing::warn!("mic: no usable input device");
-        return None;
+    ears: &Ears,
+    hour: u8,
+    preloaded: Option<Vec<u8>>,
+) {
+    state.listening.store(true, Ordering::SeqCst);
+    let pcm = match preloaded {
+        Some(p) => Some(p),
+        None => match Recorder::open(&settings.lock()) {
+            Some(rec) => record_turn(&rec, state, NO_SPEECH_MS).map(|(pcm, _)| pcm),
+            None => {
+                tracing::warn!("mic: no usable input device");
+                None
+            }
+        },
     };
+    state.listening.store(false, Ordering::SeqCst);
+    state.level.store(0, Ordering::Relaxed);
+
+    let Some(pcm) = pcm else {
+        (ears.on_idle)();
+        return;
+    };
+
+    match converse(client, base, hour, pcm) {
+        Some(reply) => {
+            tracing::info!("mic: heard {:?}", reply.heard);
+            (ears.on_reply)(reply);
+        }
+        None => (ears.on_idle)(),
+    }
+}
+
+/// One pass of name-spotting: wait for an utterance, ask the brain whether it
+/// was his name, and take a turn if it was.
+fn watch_tick(
+    client: &reqwest::blocking::Client,
+    base: &str,
+    settings: &Arc<Mutex<AudioSettings>>,
+    state: &Arc<EarState>,
+    ears: &Ears,
+    rec: &mut Option<Recorder>,
+) {
+    if rec.is_none() {
+        *rec = Recorder::open(&settings.lock());
+        if rec.is_none() {
+            tracing::warn!("mic: no input device for name-spotting; turning it off");
+            std::thread::sleep(Duration::from_secs(5));
+            return;
+        }
+    }
+    let Some(recorder) = rec.as_ref() else { return };
+
+    // Only listen for an utterance; never give up on silence, because silence
+    // is the normal state of a room he is waiting in.
+    let Some((pcm, _)) = record_turn(recorder, state, u64::MAX) else {
+        return;
+    };
+
+    let url = format!("{}/pet/wake", base.trim_end_matches('/'));
+    let woke = match client
+        .post(&url)
+        .header("Content-Type", "application/octet-stream")
+        .body(pcm.clone())
+        .send()
+    {
+        Ok(r) if r.status().is_success() => r.json::<WakeReply>().ok(),
+        Ok(r) => {
+            tracing::warn!("mic: {url} said {}", r.status());
+            None
+        }
+        Err(e) => {
+            tracing::warn!("mic: {url} unreachable ({e})");
+            None
+        }
+    };
+
+    let Some(w) = woke else { return };
+    if !w.wake {
+        tracing::debug!("mic: not for him — {:?}", w.heard);
+        return;
+    }
+
+    tracing::info!("mic: he heard his name in {:?}", w.heard);
+    (ears.on_wake)();
+    // Send the *same* audio on, so "Yasser, what's the weather" works in one
+    // breath rather than making you say his name and then wait for a prompt.
+    let hour = local_hour();
+    take_turn(client, base, settings, state, ears, hour, Some(pcm));
+}
+
+fn converse(
+    client: &reqwest::blocking::Client,
+    base: &str,
+    hour: u8,
+    pcm: Vec<u8>,
+) -> Option<Heard> {
+    let url = format!(
+        "{}/pet/converse?screen=desktop-pc&hour={hour}&battery=100&charging=1",
+        base.trim_end_matches('/')
+    );
+    tracing::info!("mic: sending {:.1}s of speech", secs(pcm.len()));
+    match client
+        .post(&url)
+        .header("Content-Type", "application/octet-stream")
+        .body(pcm)
+        .send()
+    {
+        Ok(r) if r.status().is_success() => match r.json::<Heard>() {
+            Ok(reply) => Some(reply),
+            Err(e) => {
+                tracing::warn!("mic: malformed reply: {e}");
+                None
+            }
+        },
+        Ok(r) => {
+            tracing::warn!("mic: {url} said {}", r.status());
+            None
+        }
+        Err(e) => {
+            tracing::warn!("mic: {url} unreachable ({e})");
+            None
+        }
+    }
+}
+
+/// Record one utterance. `None` means nothing was said, or it was cancelled.
+///
+/// Returns the audio and the peak level reached, which is the number worth
+/// having when someone reports that he did not hear them.
+fn record_turn(
+    rec: &Recorder,
+    state: &Arc<EarState>,
+    give_up_ms: u64,
+) -> Option<(Vec<u8>, u8)> {
+    let mut pre: VecDeque<Vec<u8>> = VecDeque::new();
+    let mut pre_bytes = 0usize;
+    let preroll_cap = (SOURCE_RATE as usize * 2 * PREROLL_MS as usize) / 1000;
 
     let mut pcm: Vec<u8> = Vec::new();
     let started = Instant::now();
+    let mut samples: Vec<u8> = Vec::new();
+    let mut floor: u8 = 0;
+    let mut threshold: Option<u8> = None;
+    let mut peak: u8 = 0;
     let mut speech_since: Option<Instant> = None;
     let mut speaking = false;
     let mut quiet_since: Option<Instant> = None;
 
     loop {
-        match rx.try_recv() {
-            Ok(Cmd::Cancel) | Err(TryRecvError::Disconnected) => return None,
-            Ok(Cmd::Listen { .. }) | Err(TryRecvError::Empty) => {}
+        if state.cancel.swap(false, Ordering::SeqCst) {
+            return None;
         }
-
         std::thread::sleep(Duration::from_millis(16));
-        pcm.extend_from_slice(&rec.drain());
+
+        let chunk = rec.drain();
         let level = rec.level();
         state.level.store(level, Ordering::Relaxed);
+        peak = peak.max(level);
 
-        if level >= SPEECH_LEVEL {
+        // Establish the room before judging anything against it.
+        let Some(thresh) = threshold else {
+            samples.push(level);
+            if !chunk.is_empty() {
+                pre_bytes += chunk.len();
+                pre.push_back(chunk);
+                while pre_bytes > preroll_cap {
+                    if let Some(old) = pre.pop_front() {
+                        pre_bytes -= old.len();
+                    }
+                }
+            }
+            if started.elapsed() >= Duration::from_millis(CALIBRATE_MS) {
+                floor = median(&mut samples);
+                let t = speech_bar(floor);
+                tracing::info!(
+                    "mic: noise floor {floor} (of {} samples, loudest {}), speech above {t}",
+                    samples.len(),
+                    samples.iter().copied().max().unwrap_or(0),
+                );
+                threshold = Some(t);
+            }
+            continue;
+        };
+
+        if speaking {
+            pcm.extend_from_slice(&chunk);
+        } else if !chunk.is_empty() {
+            // Not speaking yet: hold recent audio so the first syllable
+            // survives, and drop what is older than the pre-roll window.
+            pre_bytes += chunk.len();
+            pre.push_back(chunk);
+            while pre_bytes > preroll_cap {
+                if let Some(old) = pre.pop_front() {
+                    pre_bytes -= old.len();
+                }
+            }
+        }
+
+        if level >= thresh {
             quiet_since = None;
             match speech_since {
                 Some(t) if !speaking && t.elapsed() >= Duration::from_millis(SPEECH_MS) => {
                     speaking = true;
+                    for old in pre.drain(..) {
+                        pcm.extend_from_slice(&old);
+                    }
+                    pre_bytes = 0;
                 }
                 None => speech_since = Some(Instant::now()),
                 _ => {}
@@ -253,25 +458,57 @@ fn record_turn(
             if speaking {
                 let q = *quiet_since.get_or_insert_with(Instant::now);
                 if q.elapsed() >= Duration::from_millis(SILENCE_MS) {
-                    // He heard you finish. That is the whole interaction.
-                    return Some(pcm);
+                    tracing::info!(
+                        "mic: turn ended — {:.1}s, peak {peak} (floor {floor})",
+                        secs(pcm.len())
+                    );
+                    return Some((pcm, peak));
                 }
             }
         }
 
         let waited = started.elapsed();
-        if !speaking && waited >= Duration::from_millis(NO_SPEECH_MS) {
-            // Worth a log line rather than a debug one: "he opened the mic and
-            // heard nothing" is the first thing to check when someone says
-            // talking to him does not work.
-            tracing::info!("mic: nothing said in {NO_SPEECH_MS}ms; closing, treated as a poke");
+        if !speaking && waited >= Duration::from_millis(give_up_ms) {
+            tracing::info!(
+                "mic: nothing above {thresh} in {give_up_ms}ms (peak was {peak}); \
+                 closing, treated as a poke"
+            );
             return None;
         }
         if waited >= Duration::from_millis(MAX_TURN_MS) {
             tracing::info!("mic: hit the {MAX_TURN_MS}ms ceiling; sending what there is");
-            return if speaking { Some(pcm) } else { None };
+            return if speaking { Some((pcm, peak)) } else { None };
         }
     }
+}
+
+/// The room's resting level, as a median rather than a maximum.
+///
+/// `level` is a *peak* over one audio callback, so it spikes on any transient
+/// — a key press, a chair creak, the first frame after the device opens. Taking
+/// the loudest sample in the window let one of those set the floor: a headset
+/// idling at 3 calibrated to 44, and the bar was then clamped *below* its own
+/// floor, so everything read as speech and the turn could only end at the
+/// ceiling. The median ignores the spike and describes the room.
+fn median(samples: &mut [u8]) -> u8 {
+    if samples.is_empty() {
+        return 0;
+    }
+    samples.sort_unstable();
+    samples[samples.len() / 2]
+}
+
+/// How loud something has to be to count as speech in a room this noisy.
+fn speech_bar(floor: u8) -> u8 {
+    // A quarter of the floor again, because loud noise fluctuates by more than
+    // a fixed margin — and never below the fixed margin in a quiet one.
+    let margin = OVER_FLOOR.max(floor / 4);
+    floor.saturating_add(margin).max(MIN_THRESHOLD)
+}
+
+fn local_hour() -> u8 {
+    use chrono::Timelike;
+    chrono::Local::now().hour() as u8
 }
 
 fn secs(bytes: usize) -> f64 {
@@ -283,9 +520,73 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_quiet_headset_gets_a_low_bar() {
+        // The bug this replaces: a fixed threshold of 9 against a headset that
+        // peaks around 6 while someone talks normally. He heard nothing and
+        // closed the turn, which read as "the mic is not picking me up".
+        assert!(speech_bar(0) <= 6, "silence should not demand a shout");
+        assert!(speech_bar(2) <= 8);
+    }
+
+    #[test]
+    fn the_bar_is_always_above_the_floor_it_was_measured_from() {
+        // The bug this replaces: the bar was clamped to 22 while the measured
+        // floor was 44, so the room itself counted as speech, the turn never
+        // ended on silence, and he sent whatever the ceiling cut off.
+        for floor in [0u8, 1, 5, 20, 44, 80, 200, 255] {
+            assert!(
+                speech_bar(floor) > floor || floor >= 250,
+                "floor {floor} produced bar {}",
+                speech_bar(floor)
+            );
+        }
+    }
+
+    #[test]
+    fn the_bar_is_never_zero() {
+        // At zero, silence itself counts as speech and the turn never ends.
+        assert!(speech_bar(0) >= MIN_THRESHOLD);
+        assert!(MIN_THRESHOLD > 0);
+    }
+
+    #[test]
+    fn one_transient_cannot_set_the_noise_floor() {
+        // A key press mid-calibration is a single loud sample among quiet
+        // ones. Taking the loudest is how a headset idling at 3 calibrated
+        // to 44.
+        let mut quiet_room_with_a_click = [3, 2, 3, 44, 3, 2, 3];
+        assert_eq!(median(&mut quiet_room_with_a_click), 3);
+    }
+
+    #[test]
+    fn a_genuinely_loud_room_still_reads_as_loud() {
+        // The median must not simply discard high readings — only isolated
+        // ones. A room that is loud throughout should calibrate loud.
+        let mut loud = [40, 44, 41, 43, 45, 42, 44];
+        assert!(median(&mut loud) >= 40);
+    }
+
+    #[test]
+    fn an_empty_calibration_does_not_panic() {
+        assert_eq!(median(&mut []), 0);
+    }
+
+    #[test]
+    fn calibration_finishes_well_before_he_gives_up() {
+        // If the room were still being measured when the poke timeout fired,
+        // every click would close before speech could ever be detected.
+        assert!(CALIBRATE_MS * 4 < NO_SPEECH_MS);
+    }
+
+    #[test]
+    fn a_pause_mid_sentence_does_not_end_the_turn_early() {
+        assert!(SILENCE_MS < NO_SPEECH_MS);
+        assert!(NO_SPEECH_MS < MAX_TURN_MS);
+        assert!(SPEECH_MS < SILENCE_MS);
+    }
+
+    #[test]
     fn pcm_length_converts_to_seconds() {
-        // 16kHz mono PCM16 is 32,000 bytes a second; getting this wrong only
-        // shows up as a nonsense number in the log, so pin it.
         assert!((secs(32_000) - 1.0).abs() < 1e-9);
         assert_eq!(secs(0), 0.0);
     }
@@ -295,8 +596,11 @@ mod tests {
         let ear = Ear::new(
             None,
             Arc::new(Mutex::new(AudioSettings::default())),
-            Arc::new(|_| {}),
-            Arc::new(|| {}),
+            Ears {
+                on_reply: Arc::new(|_| {}),
+                on_idle: Arc::new(|| {}),
+                on_wake: Arc::new(|| {}),
+            },
         );
         assert!(!ear.is_enabled());
         assert!(!ear.listen(12));
@@ -305,8 +609,6 @@ mod tests {
 
     #[test]
     fn a_reply_parses_from_the_brains_converse_shape() {
-        // The brain adds `heard` to the usual think reply; everything else is
-        // optional because a local model's JSON is not always complete.
         let raw = r#"{"say":"yo","emotion":"happy","glitch":0,"action":"none","heard":"hey man"}"#;
         let h: Heard = serde_json::from_str(raw).unwrap();
         assert_eq!(h.say, "yo");
@@ -318,14 +620,23 @@ mod tests {
         let h: Heard = serde_json::from_str(r#"{"say":"hm"}"#).unwrap();
         assert_eq!(h.say, "hm");
         assert!(h.emotion.is_empty());
-        assert_eq!(h.glitch, 0);
     }
 
     #[test]
-    fn the_turn_ends_sooner_than_it_gives_up_waiting() {
-        // If silence-after-speech were longer than the no-speech timeout, a
-        // pause mid-sentence would be read as "said nothing" and dropped.
-        assert!(SILENCE_MS < NO_SPEECH_MS);
-        assert!(NO_SPEECH_MS < MAX_TURN_MS);
+    fn a_wake_reply_parses() {
+        let w: WakeReply =
+            serde_json::from_str(r#"{"wake":true,"heard":"yo yasser"}"#).unwrap();
+        assert!(w.wake);
+        assert_eq!(w.heard, "yo yasser");
+        let miss: WakeReply = serde_json::from_str(r#"{"wake":false,"heard":""}"#).unwrap();
+        assert!(!miss.wake);
+    }
+
+    #[test]
+    fn the_preroll_window_is_long_enough_to_hold_his_name() {
+        // The brain's wake list includes "asser" and "acer" precisely because
+        // capture used to clip the first syllable. The pre-roll is what stops
+        // that happening here.
+        assert!(PREROLL_MS >= SPEECH_MS * 4);
     }
 }

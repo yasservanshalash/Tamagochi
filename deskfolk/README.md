@@ -268,9 +268,51 @@ ear once he has finished speaking, so it becomes a back-and-forth rather than a
 series of one-shots. The engine only emits `OpenMic` after he stops talking,
 which is what stops him recording himself.
 
-Thresholds worth knowing, all in `ear.rs`: speech is peak level ≥ 9 sustained
-for 120ms (so a keyboard tap does not start a sentence), a turn ends after
-900ms of silence, and it gives up after 3s of nothing or 20s of anything.
+### Or say his name
+
+**Answers to his name** in the menu turns on name-spotting: he holds the mic
+open, and when an utterance contains his name he takes the turn himself. The
+*same* audio goes on to `/pet/converse`, so "Yasser, what's the weather" works
+in one breath rather than making you say his name and then wait for a prompt.
+A pre-roll buffer keeps the audio from before speech was detected, which is why
+the first syllable of his name survives.
+
+Off by default, and deliberately: it holds the microphone open for as long as
+he is awake. On a headset with sidetone you will hear yourself the whole time.
+An upgrade from an older `audio.json` cannot switch it on by accident — there
+is a test for that.
+
+Name-spotting goes to `/pet/wake`, which runs **local** Whisper and no LLM;
+ambient bursts through a cloud STT would burn quota and, in the alpha, knocked
+Orpheus into its fallback voice.
+
+### What counts as speech
+
+A fixed loudness threshold does not survive contact with real microphones, and
+getting this wrong is indistinguishable from a broken mic. So the bar is
+measured, not assumed: the first 280ms establishes the room's noise floor and
+speech is whatever sits clearly above it — a fixed margin in a quiet room, a
+quarter of the floor again in a loud one.
+
+The floor is the **median** of those samples, not the loudest. `level` is a
+peak over one audio callback, so it spikes on any transient — a key press, the
+first frame after the device opens. Taking the maximum let one of those set the
+floor: a headset genuinely idling at **2** calibrated to **44**, and the bar was
+then clamped *below* its own floor, so the room itself counted as speech, the
+turn never ended on silence, and he sent whatever the ceiling cut off. That is
+what "sometimes the mic isn't picking it up" actually was.
+
+Every turn logs its floor, its bar and the peak it reached, because "he did not
+hear me" is otherwise impossible to tell from "he heard me and had nothing to
+say":
+
+```
+mic: noise floor 2 (of 18 samples, loudest 13), speech above 6
+mic: turn ended — 1.6s, peak 37 (floor 2)
+```
+
+The rest, all in `ear.rs`: speech must hold for 110ms, a turn ends after 1s of
+silence, and it gives up after 4s of nothing or 25s of anything.
 
 ## The voice
 
@@ -314,5 +356,4 @@ device enumeration and persisted selection, his voice, **and click-to-talk
 conversation in both directions**.
 
 Not yet: the Control Center (Home / Habitat / Wardrobe / Soul / Memory),
-memory that survives restarts, a wake word (it is click-to-talk on purpose —
-an always-on mic is not something to switch on quietly), and an installer.
+memory that survives restarts, and an installer.

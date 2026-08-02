@@ -30,6 +30,11 @@ pub struct AudioSettings {
     pub output: Option<String>,
     #[serde(default)]
     pub input: Option<String>,
+    /// Listen for his name continuously. Off by default and deliberately so:
+    /// it holds the microphone open for as long as he is awake, which is not
+    /// something to switch on without being asked.
+    #[serde(default)]
+    pub wake: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -407,10 +412,12 @@ mod tests {
         let s = AudioSettings {
             output: Some("Razer BlackShark".into()),
             input: Some("Blue Yeti".into()),
+            wake: true,
         };
         let back: AudioSettings = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
         assert_eq!(back.output.as_deref(), Some("Razer BlackShark"));
         assert_eq!(back.input.as_deref(), Some("Blue Yeti"));
+        assert!(back.wake);
     }
 
     #[test]
@@ -420,12 +427,22 @@ mod tests {
     }
 
     #[test]
+    fn an_older_settings_file_does_not_switch_the_microphone_on() {
+        // Anyone upgrading has a file with no `wake` key at all. Defaulting
+        // that to true would silently start holding their mic open.
+        let s: AudioSettings =
+            serde_json::from_str(r#"{"output":"Speakers","input":"Mic"}"#).unwrap();
+        assert!(!s.wake, "name-spotting must be opt-in, always");
+    }
+
+    #[test]
     fn devices_are_remembered_by_name_not_index() {
         // Indices reshuffle when a headset is plugged in; a saved index would
         // silently start pointing at a different device.
         let json = serde_json::to_string(&AudioSettings {
             output: Some("Speakers (THX)".into()),
             input: None,
+            wake: false,
         })
         .unwrap();
         assert!(json.contains("Speakers (THX)"));
