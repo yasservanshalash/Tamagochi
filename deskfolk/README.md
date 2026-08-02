@@ -43,21 +43,26 @@ what lets a frog or a dragon drop in with nothing recompiled.
 ## Running it
 
 ```powershell
+.\run.ps1
+```
+
+That is the whole thing. It starts the brain on `:8087` if it is not already
+up — he needs it for both his mind and his voice — and then starts him.
+`.\run.ps1 -Release` builds optimised; `.\run.ps1 -NoBrain` leaves the brain
+alone and lets him fall back to his offline lines.
+
+Or without the launcher:
+
+```powershell
 cargo run -p deskfolk-app
 ```
 
-The companion is native — no web server, no dev build dance. Only the Control
-Center is a web page, so Vite is needed just for that:
+The companion is native, so there is no UI dev server to start first — that
+requirement died with the webview. Only the Control Center is a web page, and
+it is opened on demand from his menu:
 
 ```powershell
 cd ui;  npm install;  npm run dev      # only if you open the Control Center
-```
-
-For a single self-contained binary that serves its own assets:
-
-```powershell
-cd ui; npm run build
-cargo run -p deskfolk-app --release
 ```
 
 ### Environment
