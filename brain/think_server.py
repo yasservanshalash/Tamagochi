@@ -565,82 +565,103 @@ def tts_file(fname: str):
         return {"err": "bad name"}
     return FileResponse(TTS_DIR / fname, media_type="audio/wav")
 
+def _synth_one(s: str) -> bytes:
+    # Orpheus only by default — never switch to Kokoro (different voice).
+    # PET_TTS_FALLBACK=1 re-enables local voice if you explicitly want it.
+    if GROQ_KEY:
+        pcm = _synth_groq(s)
+        if pcm:
+            return pcm
+        raise RuntimeError("orpheus returned empty")
+    if not TTS_FALLBACK:
+        raise RuntimeError("no Orpheus key and fallback disabled")
+    try:
+        return _synth_kokoro(s)
+    except Exception as e:
+        print("kokoro error, piper fallback:", e)
+    if not (PIPER_VOICE and Path(PIPER_VOICE).exists()):
+        raise RuntimeError("no TTS backend available for chunk")
+    s16 = subprocess.run(
+        [PIPER_BIN, "--model", PIPER_VOICE, "--output-raw"],
+        input=s.encode(), timeout=30,
+        capture_output=True, check=True).stdout
+    return subprocess.run(
+        ["ffmpeg", "-f", "s16le", "-ar", "22050", "-ac", "1",
+         "-i", "pipe:0", "-f", "s16le", "-ar", "16000",
+         "-ac", "1", "pipe:1"],
+        input=s16, timeout=30, capture_output=True, check=True).stdout
+
+def _tts_wav_stream(text: str, who: str = "tts_live"):
+    """Sentence-streamed WAV-shaped PCM16 @16k. Shared by every voice route."""
+    import struct, threading, queue
+    # header with placeholder sizes: the client reads fmt for the rate
+    # and then streams the data chunk until the connection closes
+    yield (b"RIFF" + struct.pack("<I", 0x7FFFFFF6) + b"WAVE"
+           + b"fmt " + struct.pack("<IHHIIHH", 16, 1, 1, 16000, 32000, 2, 16)
+           + b"data" + struct.pack("<I", 0x7FFFFFD2))
+    clean = _sanitize_tts_text(text) or text
+    chunks = _tts_chunks(clean)
+    print(f"{who}: {len(chunks)} chunk(s), {len(clean)} chars"
+          f"{'' if not GROQ_KEY else f' (orpheus-only, ≤{ORPHEUS_RPM:.0f} RPM)'}")
+    q = queue.Queue(maxsize=4)
+
+    def produce():
+        try:
+            for s in chunks:
+                try:
+                    pcm = _synth_one(s)
+                    if pcm:
+                        print(f"{who} chunk ok: {len(pcm)} B "
+                              f"({len(pcm)/32000:.1f}s) for {s[:40]!r}")
+                        q.put(pcm)
+                    else:
+                        print(f"{who} chunk empty for {s[:40]!r}")
+                except Exception as e:
+                    # Same voice or silence — never a different TTS.
+                    print(f"{who} synth error (no voice switch):", e)
+        finally:
+            q.put(None)
+
+    threading.Thread(target=produce, daemon=True).start()
+    # Hold the stream open until the FIRST chunk is ready so the client
+    # doesn't start playing into a hole while Orpheus is still working.
+    first = q.get()
+    if first is None:
+        print(f"{who}: ALL synth failed — empty stream")
+        return
+    yield first
+    while True:
+        chunk = q.get()
+        if chunk is None:
+            break
+        yield chunk
+
 @app.get("/pet/tts_live/{token}")
 def tts_live(token: str):
     text = _live.pop(token, "")
     if not text:
         raise HTTPException(404)
+    return StreamingResponse(_tts_wav_stream(text), media_type="audio/wav")
 
-    def _synth_one(s: str) -> bytes:
-        # Orpheus only by default — never switch to Kokoro (different voice).
-        # PET_TTS_FALLBACK=1 re-enables local voice if you explicitly want it.
-        if GROQ_KEY:
-            pcm = _synth_groq(s)
-            if pcm:
-                return pcm
-            raise RuntimeError("orpheus returned empty")
-        if not TTS_FALLBACK:
-            raise RuntimeError("no Orpheus key and fallback disabled")
-        try:
-            return _synth_kokoro(s)
-        except Exception as e:
-            print("kokoro error, piper fallback:", e)
-        if not (PIPER_VOICE and Path(PIPER_VOICE).exists()):
-            raise RuntimeError("no TTS backend available for chunk")
-        s16 = subprocess.run(
-            [PIPER_BIN, "--model", PIPER_VOICE, "--output-raw"],
-            input=s.encode(), timeout=30,
-            capture_output=True, check=True).stdout
-        return subprocess.run(
-            ["ffmpeg", "-f", "s16le", "-ar", "22050", "-ac", "1",
-             "-i", "pipe:0", "-f", "s16le", "-ar", "16000",
-             "-ac", "1", "pipe:1"],
-            input=s16, timeout=30, capture_output=True, check=True).stdout
+class SayIn(BaseModel):
+    text: str
 
-    def gen():
-        import struct, threading, queue
-        # header with placeholder sizes: the watcher reads fmt for the rate
-        # and then streams the data chunk until the connection closes
-        yield (b"RIFF" + struct.pack("<I", 0x7FFFFFF6) + b"WAVE"
-               + b"fmt " + struct.pack("<IHHIIHH", 16, 1, 1, 16000, 32000, 2, 16)
-               + b"data" + struct.pack("<I", 0x7FFFFFD2))
-        clean = _sanitize_tts_text(text) or text
-        chunks = _tts_chunks(clean)
-        print(f"tts_live: {len(chunks)} chunk(s), {len(clean)} chars"
-              f"{'' if not GROQ_KEY else f' (orpheus-only, ≤{ORPHEUS_RPM:.0f} RPM)'}")
-        q = queue.Queue(maxsize=4)
+@app.post("/pet/speak")
+def pet_speak(body: SayIn):
+    """Speak arbitrary text.
 
-        def produce():
-            try:
-                for s in chunks:
-                    try:
-                        pcm = _synth_one(s)
-                        if pcm:
-                            print(f"tts_live chunk ok: {len(pcm)} B "
-                                  f"({len(pcm)/32000:.1f}s) for {s[:40]!r}")
-                            q.put(pcm)
-                        else:
-                            print(f"tts_live chunk empty for {s[:40]!r}")
-                    except Exception as e:
-                        # Same voice or silence — never a different TTS.
-                        print("tts_live synth error (no voice switch):", e)
-            finally:
-                q.put(None)
-
-        threading.Thread(target=produce, daemon=True).start()
-        # Hold the stream open until the FIRST chunk is ready so the client
-        # doesn't start playing into a hole while Orpheus is still working.
-        first = q.get()
-        if first is None:
-            print("tts_live: ALL synth failed — empty stream")
-            return
-        yield first
-        while True:
-            chunk = q.get()
-            if chunk is None:
-                break
-            yield chunk
-    return StreamingResponse(gen(), media_type="audio/wav")
+    `/pet/tts_live` can only replay a token minted inside `/pet/think`, so a
+    body that runs its own LLM — Deskfolk talks straight to OpenRouter — had no
+    way to ask for a voice at all. This is that door: same Orpheus voice, same
+    chunking, same throttle, no thinking attached.
+    """
+    text = (body.text or "").strip()
+    if not text:
+        raise HTTPException(400, "no text")
+    if not _has_tts():
+        raise HTTPException(503, "no TTS backend configured")
+    return StreamingResponse(_tts_wav_stream(text, who="speak"),
+                             media_type="audio/wav")
 
 # ---- optional STT (Groq cloud, whisper.cpp server, or faster-whisper) ----
 _stt = None

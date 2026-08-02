@@ -1,0 +1,85 @@
+//! Loads the real shipped Yasser package.
+//!
+//! This is the format's end-to-end contract test: if the generator, the
+//! manifest schema and the validator ever drift apart, this fails.
+
+use std::path::PathBuf;
+
+use deskfolk_package::{CharacterPackage, Role};
+
+fn yasser() -> CharacterPackage {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../characters/yasser");
+    CharacterPackage::load_dir(&root)
+        .unwrap_or_else(|e| panic!("failed to load {}: {e}", root.display()))
+}
+
+#[test]
+fn loads_without_fatal_problems() {
+    let p = yasser();
+    assert_eq!(p.manifest.id, "yasser");
+    assert_eq!(p.manifest.stage.width, 412);
+    // Feet sit 26px up from the bottom edge, as in the firmware.
+    assert_eq!(p.manifest.stage.anchor_y, 386);
+}
+
+#[test]
+fn ships_clean_with_no_warnings() {
+    // The package we ship is the reference every third-party author copies.
+    // It should not model bad practice.
+    let p = yasser();
+    assert!(p.warnings.is_empty(), "shipped package has warnings: {:?}", p.warnings);
+}
+
+#[test]
+fn carries_the_whole_alpha_behavior_table() {
+    let p = yasser();
+    assert_eq!(p.manifest.clips.len(), 20, "clip count drifted from the alpha");
+    assert_eq!(p.manifest.emotions.len(), 19, "emotion count drifted from the alpha");
+    assert_eq!(p.manifest.visemes.len(), 4);
+}
+
+#[test]
+fn every_role_resolves_to_a_real_clip() {
+    let p = yasser();
+    for role in [
+        Role::Idle,
+        Role::Blink,
+        Role::Talk,
+        Role::Think,
+        Role::Sleep,
+        Role::Startle,
+        Role::Glitch,
+    ] {
+        let name = p.role_clip(role);
+        assert!(p.clip(name).is_some(), "role {role:?} -> missing clip '{name}'");
+    }
+}
+
+#[test]
+fn every_referenced_sprite_exists_on_disk() {
+    let p = yasser();
+    let sprites = p.referenced_sprites();
+    assert!(sprites.len() > 30, "only {} sprites referenced", sprites.len());
+    for s in &sprites {
+        let path = p.sprite_path(s);
+        assert!(path.exists(), "missing sprite file: {}", path.display());
+    }
+}
+
+#[test]
+fn idle_clip_loops_so_he_is_never_frozen() {
+    let p = yasser();
+    let idle = p.clip(p.role_clip(Role::Idle)).unwrap();
+    assert!(idle.looping, "the idle clip must loop or he freezes");
+    assert!(idle.frames.len() > 1, "idle needs motion, not a single frame");
+}
+
+#[test]
+fn dance_cycles_its_music_note_overlay() {
+    // Guards the fx cycling path, which is easy to break and very visible.
+    let p = yasser();
+    let dance = p.clip("dance").expect("dance clip");
+    assert!(dance.fx.len() > 1);
+    assert!(dance.fx_ms > 0);
+}

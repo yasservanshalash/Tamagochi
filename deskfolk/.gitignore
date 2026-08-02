@@ -1,0 +1,8 @@
+# Rust build output. `target-wt` is a second target dir used when a build must
+# not disturb a copy of the app that is already running.
+target/
+target-wt/
+
+# Frontend
+ui/node_modules/
+ui/dist/

@@ -1,0 +1,501 @@
+{
+  "format": 1,
+  "id": "yasser",
+  "name": "Yasser",
+  "version": "0.1.0",
+  "author": "Yasser Shalash",
+  "tagline": "Always here. Probably judging you.",
+  "stage": {
+    "width": 412,
+    "height": 412,
+    "anchor_x": 206,
+    "anchor_y": 386,
+    "fx_dx": 44,
+    "fx_dy": 34,
+    "glitch_center": [
+      206,
+      190
+    ]
+  },
+  "sprites": {
+    "dir": "sprites",
+    "filter": "nearest"
+  },
+  "clips": {
+    "idle": {
+      "frames": [
+        {
+          "img": "img_y_sitmug",
+          "ms": 900
+        },
+        {
+          "img": "img_y_sitb",
+          "ms": 700
+        },
+        {
+          "img": "img_y_sitc",
+          "ms": 520
+        },
+        {
+          "img": "img_y_sitb",
+          "ms": 700
+        }
+      ],
+      "loop": true
+    },
+    "blink": {
+      "frames": [
+        {
+          "img": "img_y_blinkh",
+          "ms": 60
+        },
+        {
+          "img": "img_y_blink",
+          "ms": 110
+        },
+        {
+          "img": "img_y_blinkh",
+          "ms": 60
+        }
+      ]
+    },
+    "talk": {
+      "frames": [
+        {
+          "img": "img_y_talk0",
+          "ms": 100
+        },
+        {
+          "img": "img_y_talk1",
+          "ms": 90
+        },
+        {
+          "img": "img_y_talk2",
+          "ms": 100
+        },
+        {
+          "img": "img_y_talk3",
+          "ms": 120
+        },
+        {
+          "img": "img_y_talk2",
+          "ms": 90
+        },
+        {
+          "img": "img_y_talk1",
+          "ms": 90
+        }
+      ],
+      "loop": true
+    },
+    "think": {
+      "frames": [
+        {
+          "img": "img_y_expr3",
+          "ms": 800
+        },
+        {
+          "img": "img_y_expr3",
+          "ms": 800,
+          "dy": 1
+        }
+      ],
+      "loop": true,
+      "fx": [
+        "img_fx_think"
+      ]
+    },
+    "possessed": {
+      "frames": [
+        {
+          "img": "img_y_pos0",
+          "ms": 140,
+          "dx": 2
+        },
+        {
+          "img": "img_y_pos1",
+          "ms": 140,
+          "dx": -2
+        },
+        {
+          "img": "img_y_pos2",
+          "ms": 140,
+          "dx": 1
+        },
+        {
+          "img": "img_y_pos3",
+          "ms": 140,
+          "dx": -1
+        },
+        {
+          "img": "img_y_pos4",
+          "ms": 140,
+          "dx": 2
+        }
+      ],
+      "loop": true
+    },
+    "wave": {
+      "frames": [
+        {
+          "img": "img_y_act0",
+          "ms": 150
+        },
+        {
+          "img": "img_y_act1",
+          "ms": 140
+        },
+        {
+          "img": "img_y_act0",
+          "ms": 150
+        },
+        {
+          "img": "img_y_act1",
+          "ms": 140
+        },
+        {
+          "img": "img_y_act0",
+          "ms": 150
+        },
+        {
+          "img": "img_y_act1",
+          "ms": 150
+        }
+      ]
+    },
+    "laugh": {
+      "frames": [
+        {
+          "img": "img_y_expr2",
+          "ms": 1700
+        }
+      ],
+      "fx": [
+        "img_fx_heart"
+      ]
+    },
+    "sad": {
+      "frames": [
+        {
+          "img": "img_y_expr0",
+          "ms": 1300
+        },
+        {
+          "img": "img_y_expr0",
+          "ms": 1300,
+          "dy": 1
+        }
+      ],
+      "loop": true,
+      "fx": [
+        "img_fx_drop"
+      ]
+    },
+    "startle": {
+      "frames": [
+        {
+          "img": "img_y_expr1",
+          "ms": 1500
+        }
+      ],
+      "fx": [
+        "img_fx_bangq"
+      ]
+    },
+    "suspicious": {
+      "frames": [
+        {
+          "img": "img_y_expr4",
+          "ms": 1800
+        }
+      ]
+    },
+    "whisper": {
+      "frames": [
+        {
+          "img": "img_y_speak2",
+          "ms": 900
+        },
+        {
+          "img": "img_y_speak2",
+          "ms": 900,
+          "dy": 1
+        }
+      ],
+      "loop": true
+    },
+    "point": {
+      "frames": [
+        {
+          "img": "img_y_speak0",
+          "ms": 1500
+        }
+      ]
+    },
+    "shrug": {
+      "frames": [
+        {
+          "img": "img_y_act2",
+          "ms": 1400
+        }
+      ]
+    },
+    "facepalm": {
+      "frames": [
+        {
+          "img": "img_y_act3",
+          "ms": 1700
+        }
+      ]
+    },
+    "arms_crossed": {
+      "frames": [
+        {
+          "img": "img_y_act4",
+          "ms": 1200
+        },
+        {
+          "img": "img_y_act4",
+          "ms": 1200,
+          "dx": 1
+        }
+      ],
+      "loop": true,
+      "fx": [
+        "img_fx_anger"
+      ]
+    },
+    "jump": {
+      "frames": [
+        {
+          "img": "img_y_big0",
+          "ms": 200,
+          "dy": -6
+        },
+        {
+          "img": "img_y_big1",
+          "ms": 190,
+          "dy": 30
+        },
+        {
+          "img": "img_y_big2",
+          "ms": 220,
+          "dy": 2
+        },
+        {
+          "img": "img_y_big0",
+          "ms": 140,
+          "dy": -2
+        }
+      ]
+    },
+    "dance": {
+      "frames": [
+        {
+          "img": "img_y_big3",
+          "ms": 240,
+          "dx": -3
+        },
+        {
+          "img": "img_y_big4",
+          "ms": 240,
+          "dx": 3
+        }
+      ],
+      "loop": true,
+      "fx": [
+        "img_fx_note1",
+        "img_fx_note2"
+      ],
+      "fx_ms": 380
+    },
+    "stretch": {
+      "frames": [
+        {
+          "img": "img_y_stretch",
+          "ms": 2200
+        }
+      ]
+    },
+    "on_phone": {
+      "frames": [
+        {
+          "img": "img_y_sitpad",
+          "ms": 6000
+        }
+      ],
+      "loop": true
+    },
+    "sleep": {
+      "frames": [
+        {
+          "img": "img_y_zsleep",
+          "ms": 1400
+        },
+        {
+          "img": "img_y_zsleep",
+          "ms": 1400,
+          "dy": 1
+        }
+      ],
+      "loop": true
+    }
+  },
+  "emotions": {
+    "idle": {
+      "clip": "idle",
+      "base": true
+    },
+    "happy": {
+      "clip": "wave"
+    },
+    "talk": {
+      "clip": "talk",
+      "base": true,
+      "hold_ms": 2600
+    },
+    "think": {
+      "clip": "think",
+      "base": true,
+      "hold_ms": 4000
+    },
+    "glitch": {
+      "clip": "possessed",
+      "base": true,
+      "hold_ms": 2200
+    },
+    "dance": {
+      "clip": "dance",
+      "base": true,
+      "hold_ms": 5200
+    },
+    "celebrate": {
+      "clip": "dance",
+      "base": true,
+      "hold_ms": 5200
+    },
+    "jump": {
+      "clip": "jump"
+    },
+    "confused": {
+      "clip": "shrug"
+    },
+    "sad": {
+      "clip": "sad",
+      "base": true,
+      "hold_ms": 3500
+    },
+    "scared": {
+      "clip": "startle"
+    },
+    "laugh": {
+      "clip": "laugh"
+    },
+    "suspicious": {
+      "clip": "suspicious"
+    },
+    "whisper": {
+      "clip": "whisper",
+      "base": true,
+      "hold_ms": 3000
+    },
+    "point": {
+      "clip": "point"
+    },
+    "facepalm": {
+      "clip": "facepalm"
+    },
+    "grumpy": {
+      "clip": "arms_crossed",
+      "base": true,
+      "hold_ms": 3000
+    },
+    "stretch": {
+      "clip": "stretch"
+    },
+    "busy": {
+      "clip": "on_phone",
+      "base": true,
+      "hold_ms": 6000
+    }
+  },
+  "visemes": [
+    "img_y_talk0",
+    "img_y_talk1",
+    "img_y_talk2",
+    "img_y_talk3"
+  ],
+  "roles": {
+    "idle": "idle",
+    "blink": "blink",
+    "talk": "talk",
+    "think": "think",
+    "sleep": "sleep",
+    "startle": "startle",
+    "glitch": "possessed",
+    "glitch_fx": [
+      "img_fx_static1",
+      "img_fx_static2"
+    ]
+  },
+  "life": {
+    "blink_every": {
+      "min": 3000,
+      "max": 8000
+    },
+    "nap_after_ms": 1200000,
+    "night_nap_after_ms": 90000,
+    "night_hours": [
+      22,
+      8
+    ],
+    "engaged_ms": 600000,
+    "self_talk_every": {
+      "min": 60000,
+      "max": 150000
+    },
+    "self_talk": true,
+    "fidget_every": {
+      "min": 25000,
+      "max": 70000
+    },
+    "fidgets": [
+      "stretch",
+      "on_phone",
+      "suspicious",
+      "wave"
+    ],
+    "gaze_px": 7,
+    "notice_radius": 190,
+    "notice_clip": "suspicious",
+    "nudge_after_ms": 10800000,
+    "nudge_cooldown_ms": 2700000
+  },
+  "personality": {
+    "prompt": "You are Yasser: a stoner/schizo/gangsta pixel dude in a beanie and headphones who lives on your creator's desktop. You are loyal to your creator above all, conspiratorial, slangy, and you trip off-topic when something catches your attention. You answer straight \u2014 no stalling, no 'let me check the archive'. Strangers get the bouncer treatment: 'who's asking?'. Once your creator identifies himself, you stay open.",
+    "traits": {
+      "reserved_chatty": 0.75,
+      "earnest_dry": 0.7,
+      "handsoff_protective": 0.8,
+      "curiosity": 0.65,
+      "randomness": 0.6
+    },
+    "drives": {
+      "mood": 0.65,
+      "energy": 0.6,
+      "boredom": 0.4,
+      "trust": 0.95,
+      "paranoia": 0.45,
+      "curiosity": 0.65
+    },
+    "offline_lines": [
+      "brain's offline. can't think straight right now.",
+      "signal's dead. gimme a sec.",
+      "...nothing's coming through. check the server?"
+    ]
+  },
+  "voice": {
+    "engine": "groq-orpheus",
+    "name": "troy"
+  }
+}

@@ -1,0 +1,48 @@
+[package]
+name = "deskfolk-app"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Deskfolk — a runtime for AI characters that live on your desktop"
+
+[lib]
+name = "deskfolk_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.6", features = [] }
+
+[dependencies]
+deskfolk-package.workspace = true
+deskfolk-engine.workspace = true
+deskfolk-ai.workspace = true
+deskfolk-render-win.workspace = true
+
+tauri = { version = "2.11", features = ["tray-icon", "image-png"] }
+tauri-plugin-opener = "2"
+
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+image.workspace = true
+chrono.workspace = true
+parking_lot = "0.12"
+# Blocking on purpose: the voice thread streams the brain's PCM as it arrives,
+# which is what lets the first sentence start playing while the second is still
+# being synthesised. Keeping it off the async runtime means a slow TTS chunk
+# can never stall the mind or the window.
+reqwest = { version = "0.12", default-features = false, features = [
+    "blocking",
+    "json",
+    "rustls-tls",
+] }
+# cpal: device enumeration + playback/capture. The alpha could only pick a
+# device via an env var, which is not a thing a shipped product can ask of a user.
+cpal = "0.16"
+
+# Raw Win32 used to live here to fight the webview's window frame. The
+# companion is a native layered window now, so every one of those workarounds —
+# and the dependency they needed — belongs to `deskfolk-render-win` instead.

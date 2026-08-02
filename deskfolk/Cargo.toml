@@ -1,0 +1,44 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/package",
+    "crates/engine",
+    "crates/ai",
+    "crates/render-win",
+    "crates/app",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+license = "UNLICENSED"
+authors = ["Yasser Shalash"]
+
+[workspace.dependencies]
+deskfolk-package = { path = "crates/package" }
+deskfolk-engine = { path = "crates/engine" }
+deskfolk-ai = { path = "crates/ai" }
+deskfolk-render-win = { path = "crates/render-win" }
+deskfolk-memory = { path = "crates/memory" }
+
+anyhow = "1"
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "fs"] }
+tracing = "0.1"
+image = { version = "0.25", default-features = false, features = ["png"] }
+# small_rng: the engine seeds a cheap deterministic PRNG so a "day in the
+# life" can be replayed exactly in tests and in bug reports.
+rand = { version = "0.8", features = ["small_rng"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+
+# Release profile matters here: the whole pitch is that this runs comfortably
+# on old hardware and ships as a small download.
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

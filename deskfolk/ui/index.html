@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Deskfolk</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0a0a0b;
+        --panel: #141210;
+        --text: #e9e4da;
+        --dim: #8a8178;
+        --accent: #f0a030;
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: var(--bg);
+        color: var(--text);
+        font: 14px/1.5 "Segoe UI", system-ui, sans-serif;
+      }
+      main {
+        display: grid;
+        place-content: center;
+        gap: 12px;
+        height: 100%;
+        text-align: center;
+        padding: 24px;
+      }
+      h1 {
+        margin: 0;
+        font-size: 28px;
+        letter-spacing: -0.02em;
+      }
+      .tag {
+        color: var(--accent);
+        font: 12px/1 ui-monospace, monospace;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+      }
+      p {
+        margin: 0;
+        color: var(--dim);
+        max-width: 46ch;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <span class="tag">Deskfolk &middot; v0.1</span>
+      <h1>Control Center</h1>
+      <p>
+        Home, Habitat, Wardrobe, Soul and Memory land in v0.2. For now the
+        companion runs on its own — right-click him for controls.
+      </p>
+    </main>
+  </body>
+</html>

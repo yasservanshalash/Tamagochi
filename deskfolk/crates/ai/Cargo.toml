@@ -1,0 +1,19 @@
+[package]
+name = "deskfolk-ai"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+async-trait = "0.1"
+# rustls rather than native-tls: no OpenSSL to ship, and the same bytes work
+# on every Windows version we target.
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt", "macros"] }
