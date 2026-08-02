@@ -83,6 +83,7 @@ struct WindowState {
     scale: f64,
     /// The character's name, which heads his menu.
     name: String,
+    pixel_snap: bool,
     /// Device pixels per stage unit — `scale` times the monitor's DPI factor.
     unit: f64,
     size: (i32, i32),
@@ -97,7 +98,7 @@ impl WindowState {
         let dpi = if dpi == 0 { 96 } else { dpi };
         self.shared.dpi.store(dpi, Ordering::Relaxed);
         let factor = dpi as f64 / 96.0;
-        self.unit = self.scale * factor;
+        self.unit = snap_unit(self.scale * factor, self.pixel_snap);
         let w = (self.stage.width as f64 * self.unit).round() as i32;
         let h = (self.stage.height as f64 * self.unit).round() as i32;
         if self.size != (w, h) || self.surface.is_none() {
@@ -142,13 +143,32 @@ impl WindowState {
             // empty rectangle on the desktop.
             unsafe { ShowWindow(hwnd, SW_SHOWNOACTIVATE) };
             tracing::info!(
-                "companion window shown at ({x}, {y}), {}x{} device px, unit {:.2}",
+                "companion window shown at ({x}, {y}), {}x{} device px, \
+                 {} screen px per art pixel",
                 self.size.0,
                 self.size.1,
                 self.unit
             );
         }
     }
+}
+
+/// Round the scale to a whole number of screen pixels per art pixel.
+///
+/// This is the difference between pixel art and mush. At 1.3x, ten source
+/// pixels become thirteen screen pixels — so three in every ten are doubled,
+/// at irregular intervals. A 1px outline is then 1px thick along some of its
+/// length and 2px along the rest, which is exactly the ragged, "dirty" edge
+/// that gets blamed on the artwork. Only whole-number scaling keeps every
+/// source pixel the same size on screen.
+///
+/// The cost is that the companion can only be sized in whole multiples, which
+/// is a real constraint and why it can be turned off.
+fn snap_unit(raw: f64, snap: bool) -> f64 {
+    if !snap {
+        return raw.max(0.1);
+    }
+    raw.round().max(1.0)
 }
 
 /// Park him in the bottom-right of the work area, clear of the taskbar.
@@ -217,6 +237,7 @@ pub(crate) fn spawn(
                 portal: config.portal,
                 scale: config.scale,
                 name: config.name.clone(),
+                pixel_snap: config.pixel_snap,
                 unit: config.scale,
                 size: (0, 0),
                 drag: None,
@@ -492,4 +513,41 @@ pub fn cursor_pos() -> (i32, i32) {
         GetCursorPos(&mut p);
     }
     (p.x, p.y)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::snap_unit;
+
+    #[test]
+    fn a_fractional_scale_rounds_to_whole_pixels() {
+        // 1.3 was the default, and it is why a 1px outline came out 1px thick
+        // along part of its length and 2px along the rest.
+        assert_eq!(snap_unit(1.3, true), 1.0);
+        assert_eq!(snap_unit(1.6, true), 2.0);
+        assert_eq!(snap_unit(2.0, true), 2.0);
+    }
+
+    #[test]
+    fn snapping_never_scales_below_one_to_one() {
+        // Rounding 0.4 to zero would divide by zero downstream, and rounding
+        // it to nothing visible is not a size anyone asked for.
+        assert_eq!(snap_unit(0.4, true), 1.0);
+        assert_eq!(snap_unit(0.0, true), 1.0);
+    }
+
+    #[test]
+    fn a_high_dpi_display_still_lands_on_whole_pixels() {
+        // 1.0 companion scale on a 150% display: 1.5 device px per art px is
+        // exactly the case that has to round rather than pass through.
+        assert_eq!(snap_unit(1.0 * 1.5, true), 2.0);
+        assert_eq!(snap_unit(1.0 * 1.25, true), 1.0);
+    }
+
+    #[test]
+    fn snapping_can_be_turned_off_for_an_arbitrary_size() {
+        assert_eq!(snap_unit(1.3, false), 1.3);
+        // Still guarded, so a nonsense scale cannot collapse the window.
+        assert_eq!(snap_unit(0.0, false), 0.1);
+    }
 }

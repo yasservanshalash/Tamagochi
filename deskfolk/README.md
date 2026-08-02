@@ -66,7 +66,8 @@ cargo run -p deskfolk-app --release
 |---|---|---|
 | `DESKFOLK_LOG` | `info` | Tracing filter. `deskfolk_lib=trace` logs every hit-test. |
 | `DESKFOLK_CHARACTER` | `yasser` | Which package under `characters/` to load. |
-| `DESKFOLK_SCALE` | `1.3` | Stage units to logical pixels. |
+| `DESKFOLK_SCALE` | `1.3` | Stage units to logical pixels. **Rounded to a whole number** — see below. |
+| `DESKFOLK_PIXEL_SNAP` | on | `off` allows a fractional scale, at the cost of a ragged silhouette. |
 | `DESKFOLK_PORTAL` | `untethered` | `untethered`, `circle`, or `rounded`. |
 | `DESKFOLK_PROVIDER` | auto | `anthropic`, `openrouter`, `groq`, `ollama`, `sidecar`. |
 | `DESKFOLK_MODEL` | per provider | Overrides the model for whichever provider is chosen. |
@@ -204,6 +205,29 @@ Three things that bite, all fixed and all tested:
   *algebraically* 0 and 1 there; in `f32` it lands a whisker off, which leaves
   a settled card a fraction of a pixel from its slot and the animation never
   quite still.
+
+## Why he can only be sized in whole numbers
+
+Pixel art survives exactly one kind of scaling: whole-number. At the old
+default of 1.3x, ten source pixels became thirteen screen pixels — so three in
+every ten were doubled, at irregular intervals. A 1px outline was then 1px
+thick along part of its length and 2px along the rest, the ribbing on his
+beanie came out uneven, and the whole character read as *dirty*. It looked like
+bad artwork and was actually bad arithmetic.
+
+So the scale is rounded to a whole number of screen pixels per art pixel. The
+cost is real and worth stating: he comes in sizes, not on a slider.
+
+| `DESKFOLK_SCALE` | Window | Character |
+|---|---|---|
+| `1` (from any value under 1.5) | 412x412 | ~238px tall, razor sharp |
+| `2` (from 1.5 or more) | 824x824 | ~476px tall, razor sharp |
+
+`DESKFOLK_PIXEL_SNAP=off` restores arbitrary sizing for anyone who wants a
+particular pixel height more than a clean silhouette.
+
+The same rule is why the renderer blits nearest-neighbour and never
+interpolates: any filtering turns a crisp 2px outline into mush.
 
 ## Audio devices
 

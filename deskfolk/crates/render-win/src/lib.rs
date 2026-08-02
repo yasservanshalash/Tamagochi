@@ -93,6 +93,9 @@ pub struct Config {
     /// window. He becomes a genuine resident of the desktop — and is only
     /// visible when the desktop is.
     pub on_desktop: bool,
+    /// Round the scale so one art pixel is a whole number of screen pixels.
+    /// Off means arbitrary sizes and a visibly ragged silhouette.
+    pub pixel_snap: bool,
 }
 
 /// What the window needs from the application.

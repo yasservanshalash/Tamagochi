@@ -274,6 +274,19 @@ fn boot_companion(app: &AppHandle) -> anyhow::Result<()> {
     // window floating over everything.
     let on_desktop = matches!(std::env::var("DESKFOLK_LAYER").as_deref(), Ok("desktop"));
 
+    // Pixel art only survives whole-number scaling. `DESKFOLK_PIXEL_SNAP=off`
+    // buys an arbitrary size at the cost of a visibly ragged silhouette.
+    let pixel_snap = !matches!(
+        std::env::var("DESKFOLK_PIXEL_SNAP").as_deref(),
+        Ok("off" | "0" | "false")
+    );
+    if pixel_snap && (scale.fract() > 0.01 && scale.fract() < 0.99) {
+        tracing::info!(
+            "scale {scale} is not a whole number; rounding so art pixels stay square \
+             (set DESKFOLK_PIXEL_SNAP=off to keep {scale})"
+        );
+    }
+
     let companion = Companion::spawn(
         &pkg,
         deskfolk_render_win::Config {
@@ -282,6 +295,7 @@ fn boot_companion(app: &AppHandle) -> anyhow::Result<()> {
             scale,
             portal,
             on_desktop,
+            pixel_snap,
         },
         host,
     )
