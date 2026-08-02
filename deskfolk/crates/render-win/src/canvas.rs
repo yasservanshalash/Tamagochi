@@ -281,8 +281,13 @@ impl<'a> Canvas<'a> {
         self.stroke_line(tr.0, tr.1, br.0, br.1, thickness, color);
     }
 
-    /// Composite a coverage map with the same lean as the chip it sits on, so
+    /// Composite a coverage map with the same lean as the card it sits on, so
     /// the label belongs to the card instead of floating on top of it.
+    ///
+    /// Each row is offset by a *fractional* amount and split across two
+    /// columns. Rounding the offset to a whole pixel instead — the obvious
+    /// implementation — stair-steps every glyph along the slant, and because
+    /// the eye follows the diagonal it reads as low-resolution, cheap type.
     pub fn blit_coverage_skewed(
         &mut self,
         cov: &[u8],
@@ -297,24 +302,32 @@ impl<'a> Canvas<'a> {
             return;
         }
         for y in 0..ch {
-            let ty = dy + y as f32;
-            let row = ty.round() as i32;
+            let row = (dy + y as f32).round() as i32;
             if row < 0 || row >= self.h {
                 continue;
             }
             let frac = y as f32 / ch as f32;
             let xo = dx + skew * (1.0 - frac);
+            let base = xo.floor();
+            // How much of each sample spills into the next column across.
+            let bleed = xo - base;
+            let base = base as i32;
             for x in 0..cw {
-                let c = cov[(y as usize) * (cw as usize) + x as usize];
-                if c == 0 {
+                let c = cov[(y as usize) * (cw as usize) + x as usize] as f32;
+                if c == 0.0 {
                     continue;
                 }
-                let tx = (xo + x as f32).round() as i32;
-                if tx < 0 || tx >= self.w {
-                    continue;
+                let tx = base + x;
+                let left = (c * (1.0 - bleed)).round() as u8;
+                let right = (c * bleed).round() as u8;
+                if left > 0 && tx >= 0 && tx < self.w {
+                    let i = (row as usize) * (self.w as usize) + tx as usize;
+                    self.px[i] = over(self.px[i], scale_alpha(color, left));
                 }
-                let i = (row as usize) * (self.w as usize) + tx as usize;
-                self.px[i] = over(self.px[i], scale_alpha(color, c));
+                if right > 0 && tx + 1 >= 0 && tx + 1 < self.w {
+                    let i = (row as usize) * (self.w as usize) + (tx + 1) as usize;
+                    self.px[i] = over(self.px[i], scale_alpha(color, right));
+                }
             }
         }
     }

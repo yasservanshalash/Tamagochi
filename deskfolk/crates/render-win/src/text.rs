@@ -26,6 +26,16 @@ pub fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
+/// Glyphs are rasterised this many times larger and box-filtered back down.
+///
+/// GDI's own anti-aliasing is hinted and quantised: at UI sizes it snaps stems
+/// to whole pixels and hands back chunky, uneven edges that read as cheap —
+/// especially on a slanted card, where the eye follows the diagonal and sees
+/// every step. Rendering at 3x and averaging 9 samples per pixel gives smooth,
+/// unhinted coverage instead. It costs nothing at runtime because every label
+/// is rasterised once and cached.
+const SS: i32 = 3;
+
 pub struct TextRenderer {
     dc: HDC,
     bitmap: HBITMAP,
@@ -42,6 +52,15 @@ impl TextRenderer {
     /// in which case the caller simply draws no text — a bubble without a
     /// caption still beats no companion.
     pub fn new(px: i32) -> Option<Self> {
+        Self::build(px, FW_SEMIBOLD as i32)
+    }
+
+    /// Heavier, for type that has to carry a card on its own.
+    pub fn bold(px: i32) -> Option<Self> {
+        Self::build(px, 700)
+    }
+
+    fn build(px: i32, weight: i32) -> Option<Self> {
         unsafe {
             let screen = GetDC(std::ptr::null_mut());
             let dc = CreateCompatibleDC(screen);
@@ -53,11 +72,11 @@ impl TextRenderer {
             // which is what "12px text" means everywhere else in this project.
             let face = wide("Segoe UI");
             let font = CreateFontW(
-                -px.max(1),
+                -(px.max(1) * SS),
                 0,
                 0,
                 0,
-                FW_SEMIBOLD as i32,
+                weight,
                 0,
                 0,
                 0,
@@ -91,11 +110,14 @@ impl TextRenderer {
     }
 
     /// Wrapped size of `text` within `max_w`, in device pixels.
+    ///
+    /// Measured at the supersampled size and divided back down, so callers
+    /// never have to know that the rasteriser works larger than they do.
     pub fn measure(&self, text: &str, max_w: i32) -> (i32, i32) {
         let mut rect = RECT {
             left: 0,
             top: 0,
-            right: max_w.max(1),
+            right: (max_w.max(1)).saturating_mul(SS),
             bottom: 0,
         };
         let s = wide(text);
@@ -108,7 +130,9 @@ impl TextRenderer {
                 DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX,
             );
         }
-        ((rect.right - rect.left).max(0), (rect.bottom - rect.top).max(0))
+        // Round up, so a glyph never loses its last column to integer division.
+        let up = |v: i32| (v.max(0) + SS - 1) / SS;
+        (up(rect.right - rect.left), up(rect.bottom - rect.top))
     }
 
     fn ensure(&mut self, w: i32, h: i32) -> bool {
@@ -164,10 +188,17 @@ impl TextRenderer {
 
     /// Render `text` wrapped into a `w` x `h` box and return its coverage.
     ///
+    /// `w`/`h` are in final device pixels; the glyphs are rasterised `SS` times
+    /// larger and box-filtered down on the way out.
+    ///
     /// `flags` are raw `DrawText` flags so the caller can centre or left-align
     /// without this module growing a layout opinion.
     pub fn coverage(&mut self, text: &str, w: i32, h: i32, flags: u32) -> Option<Vec<u8>> {
-        if !self.ensure(w, h) {
+        if w <= 0 || h <= 0 {
+            return None;
+        }
+        let (bw, bh) = (w * SS, h * SS);
+        if !self.ensure(bw, bh) {
             return None;
         }
         let stride = self.w as usize;
@@ -177,15 +208,15 @@ impl TextRenderer {
             std::slice::from_raw_parts_mut(self.bits, stride * self.h as usize)
         };
         // Black background: brightness *is* coverage.
-        for y in 0..h as usize {
-            px[y * stride..y * stride + w as usize].fill(0);
+        for y in 0..bh as usize {
+            px[y * stride..y * stride + bw as usize].fill(0);
         }
 
         let mut rect = RECT {
             left: 0,
             top: 0,
-            right: w,
-            bottom: h,
+            right: bw,
+            bottom: bh,
         };
         let s = wide(text);
         unsafe {
@@ -194,12 +225,20 @@ impl TextRenderer {
             windows_sys::Win32::Graphics::Gdi::GdiFlush();
         }
 
+        let n = (SS * SS) as u32;
         let mut cov = vec![0u8; (w * h) as usize];
         for y in 0..h as usize {
             for x in 0..w as usize {
-                let p = px[y * stride + x];
-                let (r, g, b) = ((p >> 16) & 0xff, (p >> 8) & 0xff, p & 0xff);
-                cov[y * w as usize + x] = r.max(g).max(b) as u8;
+                let mut sum = 0u32;
+                for sy in 0..SS as usize {
+                    let row = (y * SS as usize + sy) * stride + x * SS as usize;
+                    for sx in 0..SS as usize {
+                        let p = px[row + sx];
+                        let (r, g, b) = ((p >> 16) & 0xff, (p >> 8) & 0xff, p & 0xff);
+                        sum += r.max(g).max(b);
+                    }
+                }
+                cov[y * w as usize + x] = (sum / n) as u8;
             }
         }
         Some(cov)

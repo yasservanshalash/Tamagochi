@@ -309,9 +309,11 @@ fn create(
     let unit = if dpi == 0 { 1.0 } else { dpi as f32 / 96.0 };
 
     let rows = flatten(entries);
-    let mut label = TextRenderer::new((14.0 * unit).round() as i32)
+    // Bold, and a little larger than a list would need: these labels carry a
+    // whole card each, and light type on a leaning slab reads as an accident.
+    let mut label = TextRenderer::bold((15.0 * unit).round() as i32)
         .ok_or_else(|| "no text renderer for the menu".to_string())?;
-    let mut title_font = TextRenderer::new((17.0 * unit).round() as i32)
+    let mut title_font = TextRenderer::bold((18.0 * unit).round() as i32)
         .ok_or_else(|| "no title renderer for the menu".to_string())?;
 
     // Measure everything once. The cards are all one width so the fan reads
