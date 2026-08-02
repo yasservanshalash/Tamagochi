@@ -58,14 +58,38 @@ def check(path: Path):
         errors.append("fully opaque — no transparency at all. The background "
                       "must be erased, not filled with a colour to key out")
 
-    # Binary alpha: the existing set has zero partial-alpha pixels. Soft edges
-    # halo against whatever wallpaper is behind him.
+    # Partial alpha used to be banned outright, because the webview companion
+    # could not composite it and a soft edge came out as a halo. The native
+    # renderer premultiplies and composites per pixel, so a feathered
+    # silhouette is now correct — and on a light wallpaper it is the
+    # difference between a curve and a staircase.
+    #
+    # What is still wrong is partial alpha *away* from the silhouette: a
+    # half-transparent layer left switched on, or a matte baked into the
+    # middle of him. So the rule is about where it is, not whether it exists.
     hist = alpha.histogram()
     partial = sum(hist[1:255])
     if partial:
-        pct = 100 * partial / (im.width * im.height)
-        errors.append(f"{partial} anti-aliased pixels ({pct:.2f}%) — turn OFF "
-                      f"anti-aliasing; alpha must be only 0 or 255")
+        px = im.load()
+        w, h = im.size
+        stray = 0
+        for y in range(h):
+            for x in range(w):
+                a = px[x, y][3]
+                if a in (0, 255):
+                    continue
+                touches_solid = any(
+                    0 <= x + dx < w and 0 <= y + dy < h and px[x + dx, y + dy][3] == 255
+                    for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1),
+                                   (1, 1), (1, -1), (-1, 1), (-1, -1))
+                )
+                if not touches_solid:
+                    stray += 1
+        if stray:
+            pct = 100 * stray / (im.width * im.height)
+            errors.append(f"{stray} half-transparent pixels ({pct:.2f}%) away from "
+                          f"the silhouette — a see-through layer or a baked-in "
+                          f"matte, not an edge")
 
     bbox = alpha.getbbox()
     if bbox is None:

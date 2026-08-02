@@ -9,7 +9,7 @@ frames drop in without touching code.
 | Rule | Value | Why |
 |---|---|---|
 | Format | PNG, RGBA | Alpha is already how transparency works — **never** a green screen |
-| Alpha | Binary only: 0 or 255 | Your current set has **zero** partial-alpha pixels across 1.66M. Anti-aliased edges would halo against the desktop |
+| Alpha | Soft edges welcome | **Changed.** This used to say binary-only, because the webview companion could not composite partial alpha and a soft edge came out as a halo. The native renderer premultiplies per pixel, so anti-aliased edges are now correct — and on a light wallpaper they are the difference between a curve and a staircase. Keep partial alpha *on the silhouette*; a half-transparent layer through the middle of him is still a mistake |
 | Canvas | Trim tight to the ink | No padding. Every existing sprite has a **0px bottom gap** |
 | Bottom row | The contact point | His feet / the beanbag base. The engine anchors bottom-centre, which is what stops him bobbing when clips swap |
 | Height — full body | **238 px** | Seated and standing poses. Width free (yours run 114–252) |
@@ -105,10 +105,13 @@ know it.
 
 Whatever you use, the two settings that matter:
 
-- **Pencil tool, not brush.** Hard edges, no feathering.
-- **Anti-aliasing OFF.** Every soft pixel becomes a halo against the wallpaper.
-  In Aseprite this is off by default; in Photoshop turn it off on the Pencil,
-  Eraser, *and* the Magic Wand / selection tools.
+- **Pencil tool, not brush,** for the interior. Pixel art wants deliberate
+  pixels, not airbrushed ones.
+- **Anti-aliasing on the silhouette is fine now** — see the alpha rule above.
+  What still ruins a frame is a *matte*: any background colour left behind
+  under partial alpha. Erase the background layer; never fill it with white,
+  black or green and key it out afterwards. That is the exact mistake that put
+  a grey halo on this set in the first place.
 
 ### Palette
 
