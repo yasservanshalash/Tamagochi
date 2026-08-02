@@ -1,0 +1,14 @@
+# Secrets never leave this machine.
+#
+# The repository root already ignores `.env`, but a key is not the kind of
+# thing to protect in only one place — a second copy of the rule here means a
+# reorganised root ignore, or this folder being reused somewhere else, cannot
+# quietly start committing it.
+.env
+.env.*
+!.env.example
+
+# Runtime state, regenerated on demand.
+tts_cache/
+yasser_memory.json
+last_heard.wav

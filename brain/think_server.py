@@ -87,8 +87,25 @@ GROQ_TTS = "https://api.groq.com/openai/v1/audio/speech"
 #   PET_TTS_KEY=<their key>
 #   PET_GROQ_TTS_MODEL=canopylabs/orpheus-3b-0.1-ft
 #   PET_GROQ_TTS_VOICE=dan
+def _env_ref(value: str) -> str:
+    """Resolve a `${OTHER_KEY}` reference to another environment variable.
+
+    The .env loaders here are plain KEY=value with no expansion, so pointing
+    the voice at a provider whose key you already have would otherwise mean
+    pasting the same secret a second time — and two copies of a key is one
+    copy too many to keep in step.
+    """
+    v = (value or "").strip()
+    if v.startswith("${") and v.endswith("}"):
+        return os.environ.get(v[2:-1], "")
+    return v
+
+
 TTS_URL = os.environ.get("PET_TTS_URL", GROQ_TTS)
-TTS_KEY = os.environ.get("PET_TTS_KEY", "") or GROQ_KEY
+# Groq speaks wav. OpenRouter offers mp3 or pcm and *defaults to raw pcm*,
+# which has no header for ffmpeg to decode — so ask for mp3 there instead.
+TTS_FORMAT = os.environ.get("PET_TTS_FORMAT", "wav")
+TTS_KEY = _env_ref(os.environ.get("PET_TTS_KEY", "")) or GROQ_KEY
 GROQ_TTS_MODEL = os.environ.get("PET_GROQ_TTS_MODEL",
                                 "canopylabs/orpheus-v1-english")
 GROQ_TTS_VOICE = os.environ.get("PET_GROQ_TTS_VOICE", "troy")
@@ -209,7 +226,7 @@ def _synth_groq(s: str) -> bytes:
                     headers={"Authorization": f"Bearer {TTS_KEY}",
                              "Content-Type": "application/json"},
                     json={"model": GROQ_TTS_MODEL, "voice": GROQ_TTS_VOICE,
-                          "input": s, "response_format": "wav"},
+                          "input": s, "response_format": TTS_FORMAT},
                     timeout=30)
                 if r.status_code == 429:
                     ra = r.headers.get("retry-after")
@@ -754,6 +771,14 @@ def pet_speak(body: SayIn):
 _stt = None
 STT_URL    = os.environ.get("PET_STT_URL", "")
 GROQ_STT   = "https://api.groq.com/openai/v1/audio/transcriptions"
+# Same reasoning as the TTS side: any OpenAI-compatible transcriptions
+# endpoint will do, so a blocked or exhausted account is a config change
+# rather than a code change.
+#   PET_STT_CLOUD_URL=https://openrouter.ai/api/v1/audio/transcriptions
+#   PET_STT_CLOUD_KEY=<key>          (falls back to GROQ_API_KEY)
+#   GROQ_STT_MODEL=openai/whisper-1
+STT_CLOUD_URL = os.environ.get("PET_STT_CLOUD_URL", GROQ_STT)
+STT_CLOUD_KEY = _env_ref(os.environ.get("PET_STT_CLOUD_KEY", "")) or GROQ_KEY
 GROQ_MODEL = os.environ.get("GROQ_STT_MODEL", "whisper-large-v3-turbo")
 
 def stt_preload():
@@ -766,8 +791,9 @@ def stt_preload():
             "quota": "local voice only when orpheus is out of allowance",
             "on": "local voice on any orpheus failure",
         }[TTS_FALLBACK_MODE]
-        print(f"TTS: Groq Orpheus ({GROQ_TTS_MODEL}, voice={GROQ_TTS_VOICE}, "
-              f"≤{ORPHEUS_RPM:.0f} RPM, fallback={_fb_says})")
+        _host = TTS_URL.split("//")[-1].split("/")[0]
+        print(f"TTS: {_host} ({GROQ_TTS_MODEL}, voice={GROQ_TTS_VOICE}, "
+              f"{TTS_FORMAT}, ≤{ORPHEUS_RPM:.0f} RPM, fallback={_fb_says})")
     elif STT_URL:
         print(f"STT: whisper-cpp server {STT_URL}")
     # Preload local whisper for /pet/wake so name-spotting doesn't burn
@@ -794,8 +820,8 @@ def _transcribe_groq(pcm: bytes, prompt: str = None) -> str:
     data = {"model": GROQ_MODEL, "language": lang, "response_format": "json"}
     if prompt:
         data["prompt"] = prompt
-    r = httpx.post(GROQ_STT,
-                   headers={"Authorization": f"Bearer {GROQ_KEY}"},
+    r = httpx.post(STT_CLOUD_URL,
+                   headers={"Authorization": f"Bearer {STT_CLOUD_KEY}"},
                    files={"file": ("audio.wav", wav, "audio/wav")},
                    data=data,
                    timeout=30)
@@ -815,7 +841,7 @@ def transcribe(pcm: bytes, rate=16000, prompt=None, vad=True, cloud=True) -> str
     global _stt
     # cloud=False forces local (wake word) so we don't burn Groq RPM that
     # Orpheus TTS needs.
-    if cloud and GROQ_KEY:
+    if cloud and STT_CLOUD_KEY:
         try:
             return _transcribe_groq(pcm, prompt=prompt)
         except Exception as e:
