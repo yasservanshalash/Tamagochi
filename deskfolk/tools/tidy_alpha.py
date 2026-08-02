@@ -42,6 +42,59 @@ YELLOW = (255, 255, 82)
 N8 = ((1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (1, -1), (-1, 1), (-1, -1))
 
 
+def opaque_grid(px, w, h):
+    return [[px[x, y][3] > 0 for x in range(w)] for y in range(h)]
+
+
+def inside_body(op, w, h, x, y, reach=10):
+    """Is this transparent pixel *within* him, rather than beside him?
+
+    True when there is solid character within `reach` in all four directions.
+    A pixel in the gap between his raised arm and his head fails this — that
+    gap opens to the sky — which is exactly the distinction that has to hold,
+    because filling it would weld his arm to his face.
+    """
+    left = any(op[y][x - i] for i in range(1, min(reach, x) + 1))
+    right = any(op[y][x + i] for i in range(1, min(reach, w - 1 - x) + 1))
+    up = any(op[y - i][x] for i in range(1, min(reach, y) + 1))
+    down = any(op[y + i][x] for i in range(1, min(reach, h - 1 - y) + 1))
+    return left and right and up and down
+
+
+def thin_gaps(px, w, h, max_width=3):
+    """Transparent pixels inside him that belong to a *narrow* gap.
+
+    Width is measured as the distance out to the nearest solid pixel, grown
+    one ring at a time. A crack the key chewed through his cheek is two or
+    three pixels across; the space between his arm and his body is many.
+    Filling by width rather than by area is what separates the two without a
+    list of special cases.
+
+    Three is where it stops paying: at four the same pixels come back, so
+    everything wider than this is a gap he is meant to have.
+    """
+    ring = {(x, y) for y in range(h) for x in range(w) if not px[x, y][3]}
+    near = set()
+    frontier = {
+        (x, y)
+        for (x, y) in ring
+        if any(
+            0 <= x + dx < w and 0 <= y + dy < h and px[x + dx, y + dy][3] > 0
+            for dx, dy in N8
+        )
+    }
+    for _ in range(max_width):
+        near |= frontier
+        nxt = set()
+        for (x, y) in frontier:
+            for dx, dy in N8:
+                nx, ny = x + dx, y + dy
+                if (nx, ny) in ring and (nx, ny) not in near:
+                    nxt.add((nx, ny))
+        frontier = nxt
+    return near
+
+
 def neighbours(px, w, h, x, y):
     out = []
     for dx, dy in N8:
@@ -80,6 +133,24 @@ def tidy(im: Image.Image, passes=3, fill=5, speck=1):
         removed += len(to_clear)
         if not to_fill and not to_clear:
             break
+
+    # Then the cracks: transparency that runs *through* him rather than past
+    # him. The neighbour count above cannot see these — a pixel in the middle
+    # of a two-pixel-wide slit has solid on only two sides — so they need the
+    # width test instead.
+    op = opaque_grid(px, w, h)
+    narrow = thin_gaps(px, w, h)
+    cracks = [
+        (x, y)
+        for (x, y) in narrow
+        if inside_body(op, w, h, x, y)
+    ]
+    for x, y in cracks:
+        near = neighbours(px, w, h, x, y)
+        if near:
+            colour = Counter(n[:3] for n in near).most_common(1)[0][0]
+            px[x, y] = (*colour, 255)
+    filled += len(cracks)
 
     return im, filled, removed
 
