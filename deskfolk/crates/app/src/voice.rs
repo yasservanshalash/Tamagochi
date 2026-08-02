@@ -32,6 +32,18 @@ use crate::audio::{AudioSettings, Player};
 /// to nap and to open his mic again.
 const STREAM_TIMEOUT: Duration = Duration::from_secs(90);
 
+/// How long to wait for the *first* audio before abandoning the line.
+///
+/// Separate from the overall timeout, and shorter, because a late voice is
+/// worse than no voice. The brain holds the connection open while it retries a
+/// rate-limited synthesiser — 93 seconds, measured — and the engine has long
+/// since stopped waiting and moved on. Audio arriving then makes him start
+/// talking out of nowhere over a subtitle that has already gone.
+///
+/// Deliberately under the engine's patience, so the engine learns the voice is
+/// not coming from this rather than from its own deadline.
+const FIRST_AUDIO_TIMEOUT: Duration = Duration::from_secs(12);
+
 /// How long to keep the output device open after he stops talking. Reopening
 /// per sentence adds an audible gap on some Windows stacks; holding it forever
 /// keeps a device busy that the user may want elsewhere.
@@ -267,6 +279,14 @@ fn speak(
             Err(TryRecvError::Disconnected) => break Some(Cmd::Stop),
             Err(TryRecvError::Empty) => {}
         }
+        if fed == 0 && started.elapsed() > FIRST_AUDIO_TIMEOUT {
+            tracing::warn!(
+                "voice: no audio after {}s — abandoning so he doesn't start \
+                 talking after he has given up",
+                FIRST_AUDIO_TIMEOUT.as_secs()
+            );
+            break None;
+        }
         if started.elapsed() > STREAM_TIMEOUT {
             tracing::warn!("voice: gave up after {}s of streaming", STREAM_TIMEOUT.as_secs());
             break None;
@@ -501,6 +521,16 @@ mod tests {
     fn blank_lines_are_not_spoken() {
         let v = Voice::new(None, Arc::new(Mutex::new(AudioSettings::default())));
         assert!(!v.speak("   "));
+    }
+
+    #[test]
+    fn the_voice_gives_up_before_the_engine_stops_waiting() {
+        // The engine holds a thinking pose for 15s. If the voice waited
+        // longer, audio would arrive after he had already moved on and he
+        // would start talking out of nowhere — which is exactly what a
+        // rate-limited synthesiser produced: 93 seconds, measured.
+        assert!(FIRST_AUDIO_TIMEOUT < Duration::from_secs(15));
+        assert!(FIRST_AUDIO_TIMEOUT < STREAM_TIMEOUT);
     }
 
     #[test]
