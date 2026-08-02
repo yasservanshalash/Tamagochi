@@ -186,17 +186,22 @@ def _synth_groq(s: str) -> bytes:
                         wait = float(ra) if ra else ORPHEUS_MIN_GAP
                     except ValueError:
                         wait = ORPHEUS_MIN_GAP
-                    # A Retry-After far beyond our patience is not a lie, it is
-                    # the quota being genuinely spent for minutes. Retrying on a
-                    # capped wait cannot succeed: it burns attempts x max_wait
-                    # (80s by default) and fails anyway, while the body sits
-                    # there holding a thinking pose. Fail now so it can say the
-                    # line silently instead.
-                    if wait > max_wait * 2:
-                        print(f"groq orpheus 429 — quota spent for {wait:.0f}s; "
-                              f"not retrying, this line goes out silent")
-                        raise RuntimeError(
-                            f"429 Too Many Requests (quota spent, retry-after={ra!r})")
+                    # Say *which* limit, because "TTS isn't working" is
+                    # otherwise indistinguishable from a broken key, a dead
+                    # network or a bug in here. Groq puts the numbers in the
+                    # body: which bucket, how much is used, when it frees up.
+                    try:
+                        detail = r.json()["error"]["message"]
+                    except Exception:
+                        detail = r.text[:200]
+                    # Groq says outright when a wait cannot help. Retrying anyway
+                    # burns attempts x max_wait (80s by default) and fails
+                    # regardless, while the body holds a thinking pose the whole
+                    # time. Fail now so the line goes out silently instead.
+                    should_retry = r.headers.get("x-should-retry", "").lower() != "false"
+                    if not should_retry or wait > max_wait * 2:
+                        print(f"groq orpheus 429 — not retrying: {detail}")
+                        raise RuntimeError(f"429 Too Many Requests ({detail})")
                     # Groq often lies with huge Retry-After; cap it and stay
                     # on Orpheus — do NOT change voice.
                     wait = min(max_wait, max(ORPHEUS_MIN_GAP, wait))
