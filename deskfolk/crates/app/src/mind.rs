@@ -59,6 +59,26 @@ impl Mind {
     }
 }
 
+/// Should this reply be synthesised, or is a subtitle enough?
+///
+/// He mutters to himself on an idle timer, and until the voice was wired that
+/// cost nothing. Now every mutter is a synthesis request: in one session 25 of
+/// 43 of them were self-talk, which is what emptied the Orpheus quota — so by
+/// the time someone actually spoke to him, the reply came back 429 and silent.
+/// Ambient thinking-out-loud stays on screen; things said *to* him get a voice.
+///
+/// `DESKFOLK_VOICE_SELF_TALK=1` gives him his voice back for those, for anyone
+/// running a TTS backend without a quota to spend.
+fn worth_speaking(event: &str) -> bool {
+    if event != "self_talk" {
+        return true;
+    }
+    matches!(
+        std::env::var("DESKFOLK_VOICE_SELF_TALK").as_deref(),
+        Ok("1" | "true" | "on")
+    )
+}
+
 /// Record a spoken exchange, so what he was told out loud is part of the same
 /// thread as everything he was told in text.
 pub fn remember_exchange(mind: &Mind, user: &str, companion: &str) {
@@ -124,7 +144,11 @@ pub fn ask(
                 // marks the voice pending synchronously, and `apply_reply`
                 // needs that already true to decide whether he holds a
                 // thinking pose or starts mouthing straight away.
-                let has_audio = voice.speak(&reply.say);
+                let has_audio = if worth_speaking(&event) {
+                    voice.speak(&reply.say)
+                } else {
+                    false
+                };
                 let mut guard = rt.lock();
                 guard.inputs.busy = false;
                 guard.inputs.voice_pending = has_audio;
@@ -209,6 +233,20 @@ mod tests {
         m.remember(Role::Companion, "   ");
         m.remember(Role::User, "");
         assert!(m.history().is_empty());
+    }
+
+    #[test]
+    fn idle_muttering_does_not_burn_the_voice_quota() {
+        // 25 of 43 synthesis requests in one session were self-talk, which is
+        // what left nothing for the reply when someone actually spoke to him.
+        assert!(!worth_speaking("self_talk"));
+    }
+
+    #[test]
+    fn anything_said_to_him_still_gets_a_voice() {
+        for event in ["user_speech", "user_poke", "wake_greet", "talk_button"] {
+            assert!(worth_speaking(event), "{event} should be spoken aloud");
+        }
     }
 
     #[test]

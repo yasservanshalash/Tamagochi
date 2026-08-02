@@ -30,6 +30,13 @@ pub(crate) mod tests_support;
 /// changes nothing does no work downstream.
 pub const TICK_MS: i64 = 30;
 
+/// How long he will hold a thinking pose waiting for a voice he was promised.
+///
+/// Generous, because synthesis genuinely takes seconds and cutting it short
+/// would put him back to idle just as he starts talking — but finite, because
+/// the alternative is standing there forever over a reply already on screen.
+const VOICE_PATIENCE: i64 = 15_000;
+
 // ---------------------------------------------------------------------------
 // Public surface
 // ---------------------------------------------------------------------------
@@ -147,6 +154,18 @@ pub struct Engine {
 
     last_emotion: String,
     prev_audible: bool,
+    /// Milliseconds left to wait for a voice that was promised.
+    ///
+    /// When a reply says audio is coming he holds a thinking pose rather than
+    /// mouthing at silence. That is right, but it has to be a wait and not a
+    /// vow: if the voice never arrives — the TTS quota is spent, the brain is
+    /// gone — he would otherwise hold that pose forever.
+    awaiting_voice: i64,
+    /// He waited out the promise and no voice came. Remembered rather than
+    /// merely acted on, because the "hold a thinking pose while fetching" rule
+    /// re-asserts itself every tick and would otherwise drag him straight back
+    /// into the pose he just gave up on.
+    voice_gave_up: bool,
     pending_action: Action,
 
     /// Where he is currently looking, -1.0 (left) .. 1.0 (right). Eased
@@ -206,6 +225,8 @@ impl Engine {
             glitch_ms: 0,
             last_emotion: "idle".into(),
             prev_audible: false,
+            awaiting_voice: 0,
+            voice_gave_up: false,
             pending_action: Action::None,
             gaze: 0.0,
             cursor_was_near: false,
@@ -253,6 +274,10 @@ impl Engine {
     pub fn apply_reply(&mut self, reply: &Reply) -> Vec<Effect> {
         let mut fx = Vec::new();
         self.pending_action = Action::parse(&reply.action);
+        // A fresh reply is a fresh promise; whatever happened to the last
+        // one's voice has no bearing on this one.
+        self.voice_gave_up = false;
+        self.awaiting_voice = 0;
 
         if !reply.say.is_empty() {
             self.say(reply.say.clone(), None);
@@ -268,6 +293,7 @@ impl Engine {
             // Audio is coming: remember the mood for when sound actually
             // starts, but don't mouth-flap while TTS is still cooking.
             self.last_emotion = emotion.clone();
+            self.awaiting_voice = VOICE_PATIENCE;
             let talky = matches!(emotion.as_str(), "talk" | "whisper" | "idle" | "busy");
             if talky {
                 let think = self.pkg.role_clip(Role::Think).to_string();
@@ -419,6 +445,26 @@ impl Engine {
         let fetching = input.voice_pending && !audible;
         let gate = audible || input.voice_pending;
 
+        // A promised voice that never arrives. The host stops reporting it as
+        // pending the moment synthesis fails — a spent TTS quota, an
+        // unreachable brain — and if he simply kept waiting he would hold the
+        // thinking pose over a reply that is already on screen. The deadline
+        // covers the other shape of the same problem, where nothing ever
+        // clears `pending` at all.
+        if audible {
+            self.awaiting_voice = 0;
+            self.voice_gave_up = false;
+        } else if self.awaiting_voice > 0 {
+            self.awaiting_voice -= dt;
+            if !input.voice_pending || self.awaiting_voice <= 0 {
+                self.awaiting_voice = 0;
+                self.voice_gave_up = true;
+                fx.push(Effect::Log("voice never arrived; saying it silently".into()));
+                let emotion = self.last_emotion.clone();
+                fx.extend(self.play_emotion(&emotion, 0, 0));
+            }
+        }
+
         if audible != self.prev_audible {
             self.prev_audible = audible;
             if audible {
@@ -470,7 +516,7 @@ impl Engine {
             if self.player.base_name() == talk {
                 self.hold_ms = 500;
             }
-        } else if fetching {
+        } else if fetching && !self.voice_gave_up {
             // Waiting on the voice: hold a thinking pose, don't lip-sync.
             if !self.player.is_playing_shot() {
                 let think = self.pkg.role_clip(Role::Think).to_string();
@@ -1250,6 +1296,85 @@ mod tests {
         e.begin_thinking();
         e.stop_listening();
         assert_eq!(e.state(), State::Thinking, "must not stomp another state");
+    }
+
+    #[test]
+    fn a_promised_voice_that_never_arrives_does_not_freeze_him() {
+        // Exactly what a spent TTS quota looks like: the reply is on screen,
+        // synthesis 429s, and he holds the thinking pose over it forever.
+        let mut e = engine();
+        let think = e.package().role_clip(Role::Think).to_string();
+
+        e.apply_reply(&Reply {
+            say: "yo".into(),
+            emotion: "talk".into(),
+            glitch: 0,
+            action: "none".into(),
+            has_audio: true,
+        });
+        let waiting = Inputs {
+            local_hour: 12,
+            voice_pending: true,
+            ..Default::default()
+        };
+        run(&mut e, 300, &waiting);
+        assert_eq!(e.player.base_name(), think, "should wait at first");
+
+        // Synthesis failed: the host stops reporting it as pending.
+        let failed = Inputs { voice_pending: false, ..waiting.clone() };
+        run(&mut e, 200, &failed);
+        assert_ne!(
+            e.player.base_name(),
+            think,
+            "he should stop waiting once the voice is known not to be coming"
+        );
+    }
+
+    #[test]
+    fn he_gives_up_waiting_even_if_nothing_ever_clears_pending() {
+        // The other shape: the host never reports the failure at all.
+        let mut e = engine();
+        let think = e.package().role_clip(Role::Think).to_string();
+        e.apply_reply(&Reply {
+            say: "yo".into(),
+            emotion: "talk".into(),
+            glitch: 0,
+            action: "none".into(),
+            has_audio: true,
+        });
+        let stuck = Inputs {
+            local_hour: 12,
+            voice_pending: true,
+            ..Default::default()
+        };
+        run(&mut e, VOICE_PATIENCE + 1_000, &stuck);
+        assert_ne!(e.player.base_name(), think, "patience must be finite");
+    }
+
+    #[test]
+    fn a_voice_that_does_arrive_is_still_waited_for() {
+        // The regression guard in the other direction: giving up too eagerly
+        // would drop him out of the thinking pose just as he starts talking.
+        let mut e = engine();
+        let think = e.package().role_clip(Role::Think).to_string();
+        e.apply_reply(&Reply {
+            say: "yo".into(),
+            emotion: "talk".into(),
+            glitch: 0,
+            action: "none".into(),
+            has_audio: true,
+        });
+        let cooking = Inputs {
+            local_hour: 12,
+            voice_pending: true,
+            ..Default::default()
+        };
+        run(&mut e, 2_000, &cooking);
+        assert_eq!(
+            e.player.base_name(),
+            think,
+            "two seconds of synthesis is normal, not a failure"
+        );
     }
 
     #[test]

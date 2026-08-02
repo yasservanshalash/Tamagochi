@@ -79,6 +79,7 @@ cd ui;  npm install;  npm run dev      # only if you open the Control Center
 | `DESKFOLK_LAYER` | — | `desktop` parents him into the wallpaper, behind your icons. |
 | `DESKFOLK_VOICE` | on | `off` for a silent companion — subtitles only. |
 | `DESKFOLK_VOICE_URL` | brain / `PET_BRAIN` | Where speech is synthesised. |
+| `DESKFOLK_VOICE_SELF_TALK` | off | `1` also speaks his idle muttering. Costs quota — see below. |
 
 ### The mind
 
@@ -380,6 +381,31 @@ Two failures the byte plumbing exists to prevent, both of which are silence or
 static rather than errors: the 44-byte WAV header must not reach the speakers,
 and a network chunk that splits a 16-bit sample in half must carry the odd byte
 forward — drop it and every later sample is assembled from the wrong pair.
+
+### He does not narrate himself
+
+Idle muttering is **subtitles only**. Until the voice was wired, self-talk was
+free; now every mutter is a synthesis request, and Orpheus has a rate limit. In
+one session 25 of 43 requests were self-talk — so by the time somebody actually
+spoke to him, the reply came back `429 Too Many Requests` and silent, which
+looks exactly like a broken microphone from the outside.
+
+Things said *to* him get a voice; thinking out loud stays on screen.
+`DESKFOLK_VOICE_SELF_TALK=1` restores it for anyone on a backend without a
+quota to spend.
+
+### When the voice does not come
+
+A reply that promises audio makes him hold a thinking pose rather than mouth at
+silence — right, but it has to be a wait and not a vow. If synthesis fails, the
+host stops reporting the voice as pending and he plays the reply's emotion
+silently instead; if nothing clears it at all, he gives up after fifteen
+seconds. Without that he stands in the thinking pose forever, over a reply that
+is already on screen.
+
+That has its own trap: the rule that holds the thinking pose while a voice is
+fetching re-asserts itself every tick, so giving up has to be *remembered* or
+the next tick drags him straight back into the pose he just abandoned.
 
 ## Status
 
