@@ -26,11 +26,13 @@ use tauri::{
 
 mod audio;
 mod config;
+mod ear;
 mod mind;
 mod paths;
 mod runtime;
 mod voice;
 
+use ear::Ear;
 use mind::Mind;
 use runtime::{Runtime, GRAB_PADDING, LOOP_MS};
 use voice::Voice;
@@ -39,6 +41,7 @@ pub struct AppState {
     rt: Arc<Mutex<Runtime>>,
     audio: Arc<Mutex<audio::AudioSettings>>,
     voice: Arc<Voice>,
+    ear: Arc<Ear>,
 }
 
 /// Menu ids are `deskfolk::out::<device name>` / `::in::<device name>`, so the
@@ -61,6 +64,7 @@ struct CompanionHost {
     rt: Arc<Mutex<Runtime>>,
     mind: Arc<Mind>,
     voice: Arc<Voice>,
+    ear: Arc<Ear>,
     audio: Arc<Mutex<audio::AudioSettings>>,
 }
 
@@ -71,7 +75,7 @@ impl deskfolk_render_win::Host for CompanionHost {
         let devices = audio::list_devices(&settings);
 
         vec![
-            MenuEntry::item("talk", "Talk to him").with_icon(Icon::Talk),
+            MenuEntry::item("talk", "Talk to him").with_icon(Icon::Mic),
             MenuEntry::Separator,
             device_submenu(
                 "Microphone",
@@ -102,6 +106,15 @@ impl deskfolk_render_win::Host for CompanionHost {
     }
 
     fn on_click(&self) {
+        // Clicking again while his ear is open means you changed your mind.
+        // Without a way out, a mic opened by accident holds him until it times
+        // out.
+        if self.ear.is_listening() {
+            self.ear.cancel();
+            self.rt.lock().engine.stop_listening();
+            return;
+        }
+
         // Interrupting him mid-sentence is the whole point of poking someone
         // who is talking; letting the old line play under the new one is not.
         self.voice.stop();
@@ -116,6 +129,18 @@ impl deskfolk_render_win::Host for CompanionHost {
             // Waking him already emits its own greeting effect.
             let _ = self.rt.lock().engine.wake_up();
             return;
+        }
+
+        // One click is the whole interaction: he opens his ear, you talk, and
+        // he answers when you stop. Say nothing and it stays a poke — which is
+        // why there is no separate "send" and no mode to get stuck in.
+        if self.ear.is_enabled() {
+            let hour = local_hour();
+            self.rt.lock().engine.begin_listening();
+            if self.ear.listen(hour) {
+                return;
+            }
+            self.rt.lock().engine.stop_listening();
         }
 
         let _ = self.rt.lock().engine.play_emotion("happy", 0, 0);
@@ -255,10 +280,47 @@ fn boot_companion(app: &AppHandle) -> anyhow::Result<()> {
     }
 
     let rt = Arc::new(Mutex::new(rt));
+
+    // What to do when he has actually heard something: remember the exchange,
+    // start speaking the reply, and only then hand it to the engine — the
+    // pose depends on whether audio is coming.
+    let on_reply = {
+        let (rt, mind, voice) = (rt.clone(), mind.clone(), voice.clone());
+        Arc::new(move |h: ear::Heard| {
+            tracing::info!("he replied to speech: {:?} ({})", h.say, h.emotion);
+            mind::remember_exchange(&mind, &h.heard, &h.say);
+            let has_audio = voice.speak(&h.say);
+            let mut guard = rt.lock();
+            guard.engine.stop_listening();
+            guard.inputs.voice_pending = has_audio;
+            let emotion = if h.emotion.is_empty() { "talk".to_string() } else { h.emotion };
+            let _ = guard.engine.apply_reply(&deskfolk_engine::Reply {
+                say: h.say,
+                emotion,
+                glitch: h.glitch,
+                action: h.action,
+                has_audio,
+            });
+        }) as Arc<dyn Fn(ear::Heard) + Send + Sync>
+    };
+    // Nothing said, or the brain could not be reached: close his ear quietly
+    // rather than leaving him waiting with the subtitle up.
+    let on_idle = {
+        let rt = rt.clone();
+        Arc::new(move || rt.lock().engine.stop_listening()) as Arc<dyn Fn() + Send + Sync>
+    };
+    let ear = Arc::new(Ear::new(
+        config::resolve_voice(),
+        audio_settings.clone(),
+        on_reply,
+        on_idle,
+    ));
+
     app.manage(AppState {
         rt: rt.clone(),
         audio: audio_settings.clone(),
         voice: voice.clone(),
+        ear: ear.clone(),
     });
 
     let host = Arc::new(CompanionHost {
@@ -266,6 +328,7 @@ fn boot_companion(app: &AppHandle) -> anyhow::Result<()> {
         rt: rt.clone(),
         mind: mind.clone(),
         voice: voice.clone(),
+        ear: ear.clone(),
         audio: audio_settings,
     });
 
@@ -303,7 +366,7 @@ fn boot_companion(app: &AppHandle) -> anyhow::Result<()> {
 
     std::thread::Builder::new()
         .name("deskfolk-companion-loop".into())
-        .spawn(move || companion_loop(companion, rt, mind, voice))?;
+        .spawn(move || companion_loop(companion, rt, mind, voice, ear))?;
 
     Ok(())
 }
@@ -321,6 +384,7 @@ fn companion_loop(
     rt: Arc<Mutex<Runtime>>,
     mind: Arc<Mind>,
     voice: Arc<Voice>,
+    ear: Arc<Ear>,
 ) {
     let period = Duration::from_millis(LOOP_MS);
     let mut last = Instant::now();
@@ -347,7 +411,13 @@ fn companion_loop(
             // mic gating all hang off these three values.
             guard.inputs.voice_audible = voice.audible();
             guard.inputs.voice_pending = voice.pending();
-            guard.inputs.voice_level = voice.level();
+            // While the mic is open the level is *your* voice, not his — it
+            // is what makes the listening ring pulse as you speak.
+            guard.inputs.voice_level = if ear.is_listening() {
+                ear.level()
+            } else {
+                voice.level()
+            };
             guard.inputs.cursor = cursor_in_stage(&companion, &guard);
             let inputs = guard.inputs.clone();
             let effects = guard.engine.tick(dt, &inputs);
@@ -356,7 +426,7 @@ fn companion_loop(
         };
 
         for e in &effects {
-            handle_effect(&rt, &mind, &voice, e);
+            handle_effect(&rt, &mind, &voice, &ear, hour, e);
         }
 
         // Only wake the window when something visible actually changed.
@@ -386,7 +456,14 @@ fn cursor_in_stage(companion: &Companion, rt: &Runtime) -> Option<(i32, i32)> {
     ))
 }
 
-fn handle_effect(rt: &Arc<Mutex<Runtime>>, mind: &Arc<Mind>, voice: &Arc<Voice>, e: &Effect) {
+fn handle_effect(
+    rt: &Arc<Mutex<Runtime>>,
+    mind: &Arc<Mind>,
+    voice: &Arc<Voice>,
+    ear: &Arc<Ear>,
+    hour: u8,
+    e: &Effect,
+) {
     match e {
         Effect::Log(msg) => tracing::info!("pet: {msg}"),
         Effect::Think { event, text } => mind::ask(
@@ -396,8 +473,14 @@ fn handle_effect(rt: &Arc<Mutex<Runtime>>, mind: &Arc<Mind>, voice: &Arc<Voice>,
             event.clone(),
             text.clone(),
         ),
-        // Click-to-talk is the next task; the mic is still unconnected.
-        Effect::OpenMic => tracing::debug!("would open the mic"),
+        // He asked to listen — the engine only emits this once he has finished
+        // speaking, which is what stops him recording his own voice.
+        Effect::OpenMic => {
+            rt.lock().engine.begin_listening();
+            if !ear.listen(hour) {
+                rt.lock().engine.stop_listening();
+            }
+        }
         Effect::StopVoice => voice.stop(),
     }
 }
@@ -440,6 +523,7 @@ fn on_menu(app: &AppHandle, id: &str) {
         "sleep" => {
             if let Some(state) = app.try_state::<AppState>() {
                 state.voice.stop();
+                state.ear.cancel();
                 state.rt.lock().engine.sleep();
             }
         }
@@ -451,9 +535,15 @@ fn on_menu(app: &AppHandle, id: &str) {
         "talk" => {
             if let Some(state) = app.try_state::<AppState>() {
                 state.voice.stop();
-                let mut rt = state.rt.lock();
-                rt.engine.touch();
-                rt.engine.begin_listening();
+                {
+                    let mut rt = state.rt.lock();
+                    rt.engine.touch();
+                    rt.engine.begin_listening();
+                }
+                if !state.ear.listen(local_hour()) {
+                    state.rt.lock().engine.stop_listening();
+                    tracing::warn!("no microphone available; nothing to talk into");
+                }
             }
         }
         _ => {}

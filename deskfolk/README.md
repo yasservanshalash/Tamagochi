@@ -245,6 +245,33 @@ PCM16/16kHz mono. That is not incidental: a mono stream was **silently
 inaudible** on the creator's Razer/THX stack in the alpha — no error, no
 sound — and it cost a long debugging session.
 
+## Talking to him
+
+**Click him and talk. That is the whole interaction.**
+
+He opens his ear, you say your piece, and he answers when you stop — a short
+run of silence ends the turn. There is no second click, no send button, and no
+mode to get stuck in. Say nothing and he closes the mic after three seconds and
+treats it as the poke it was; click again mid-turn and he drops it.
+
+This replaced the alpha's flow, which was open the mic, speak, then find him
+again and click to send. That asks you to do something nobody you are talking
+to would ask for, and it only existed because nothing else ever ended the turn:
+`State::Listening` had no exit at all, so without a manual send he listened
+forever. `Engine::stop_listening` is that exit, and it is what lets silence
+close the turn instead of a click.
+
+Speech goes to the brain's `/pet/converse` — Whisper transcribes it, the same
+mind answers, and the reply comes back through the same voice path as
+everything else. If the reply carries `action: listen`, the engine reopens his
+ear once he has finished speaking, so it becomes a back-and-forth rather than a
+series of one-shots. The engine only emits `OpenMic` after he stops talking,
+which is what stops him recording himself.
+
+Thresholds worth knowing, all in `ear.rs`: speech is peak level ≥ 9 sustained
+for 120ms (so a keyboard tap does not start a sentence), a turn ends after
+900ms of silence, and it gives up after 3s of nothing or 20s of anything.
+
 ## The voice
 
 He speaks. Every reply is sent to the brain, which streams PCM back sentence by
@@ -281,14 +308,11 @@ forward — drop it and every later sample is assembled from the wrong pair.
 ## Status
 
 Working: package format and loader, life loop, native layered-window companion
-with per-pixel click-through, software renderer, speech bubble, right-click
+with per-pixel click-through, software renderer, speech bubble, animated card
 menu, cloud/local mind behind one trait, in-character offline fallback, audio
-device enumeration and persisted selection, **and his voice**.
-
-Still one-way: the microphone. `audio.rs` has a tested `Recorder` and the menu
-remembers your input device, but nothing pushes mic audio to `/pet/converse`
-yet, so `Effect::OpenMic` is still a log line. Click-to-talk is the next task.
+device enumeration and persisted selection, his voice, **and click-to-talk
+conversation in both directions**.
 
 Not yet: the Control Center (Home / Habitat / Wardrobe / Soul / Memory),
-memory that survives restarts, custom hover controls in his art style, and an
-installer.
+memory that survives restarts, a wake word (it is click-to-talk on purpose —
+an always-on mic is not something to switch on quietly), and an installer.

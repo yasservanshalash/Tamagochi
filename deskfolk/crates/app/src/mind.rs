@@ -59,6 +59,13 @@ impl Mind {
     }
 }
 
+/// Record a spoken exchange, so what he was told out loud is part of the same
+/// thread as everything he was told in text.
+pub fn remember_exchange(mind: &Mind, user: &str, companion: &str) {
+    mind.remember(Role::User, user);
+    mind.remember(Role::Companion, companion);
+}
+
 /// Build a request from the live character package plus current context.
 ///
 /// Everything character-specific — the brief, the emotion vocabulary — comes

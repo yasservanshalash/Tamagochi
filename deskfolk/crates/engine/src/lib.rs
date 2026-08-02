@@ -351,10 +351,26 @@ impl Engine {
         self.state = State::Idle;
     }
 
+    /// Open his ear. The host decides when the turn is over — he stops
+    /// listening when you stop talking — so the subtitle no longer asks you to
+    /// click anything.
     pub fn begin_listening(&mut self) {
         self.state = State::Listening;
         self.touch();
-        self.say("listening... (click me to send)", Some(60_000));
+        self.say("listening...", Some(60_000));
+    }
+
+    /// Close his ear without anything having been said.
+    ///
+    /// Nothing else in the engine leaves [`State::Listening`], which is why
+    /// this exists: without it he stays stuck listening forever, and the only
+    /// way out was the host telling him something had been sent.
+    pub fn stop_listening(&mut self) {
+        if self.state != State::Listening {
+            return;
+        }
+        self.state = State::Idle;
+        self.subtitle = None;
     }
 
     pub fn begin_thinking(&mut self) {
@@ -1194,5 +1210,43 @@ mod tests {
             e.frame(&input).subtitle.is_some(),
             "a 200-char line must outlast the 2.6s minimum"
         );
+    }
+
+    #[test]
+    fn he_can_stop_listening_when_nothing_was_said() {
+        // Nothing else in the engine leaves Listening. Without this he stays
+        // stuck with his ear open forever, which is exactly what forced the
+        // old "click me to send" step.
+        let mut e = engine();
+        let input = Inputs { local_hour: 12, ..Default::default() };
+        e.begin_listening();
+        assert_eq!(e.state(), State::Listening);
+        assert!(e.frame(&input).listening);
+
+        e.stop_listening();
+        assert_eq!(e.state(), State::Idle);
+        assert!(!e.frame(&input).listening);
+        assert!(e.frame(&input).subtitle.is_none(), "the prompt should go too");
+    }
+
+    #[test]
+    fn stopping_when_he_was_not_listening_changes_nothing() {
+        // It is called on every failed turn, including ones where he had
+        // already moved on to thinking about a reply.
+        let mut e = engine();
+        e.begin_thinking();
+        e.stop_listening();
+        assert_eq!(e.state(), State::Thinking, "must not stomp another state");
+    }
+
+    #[test]
+    fn listening_no_longer_asks_you_to_click() {
+        // The host ends the turn when you stop talking, so a subtitle telling
+        // you to click would be instructing you to do nothing.
+        let mut e = engine();
+        let input = Inputs { local_hour: 12, ..Default::default() };
+        e.begin_listening();
+        let text = e.frame(&input).subtitle.unwrap();
+        assert!(!text.contains("click"), "got {text:?}");
     }
 }
