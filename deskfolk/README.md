@@ -149,7 +149,7 @@ back into the stage.
 ## Testing
 
 ```powershell
-cargo test --workspace     # 176 tests
+cargo test --workspace     # 198 tests
 ```
 
 The engine is a pure state machine, so aliveness is testable: a simulated day
@@ -172,29 +172,38 @@ was the only thing that worked.
 
 ## His menu
 
-Right-click him and the menu is drawn by the same compositor that draws him: a
-second layered window in his palette, headed with his name, that rises into
-place while its rows stagger in. Hovering lights a row and grows an amber bar
-out of its left edge; the device lists expand *inline*, pushing the rows below
-them down, with a chevron that rotates as they open.
+Not a panel, and deliberately not a list. Right-click him and a stack of
+leaning cards flies out of his shoulder — to his right if he is standing on the
+left of the screen, to his left if he is on the right — bowing outward through
+the middle, each arriving a beat after the last and overshooting slightly
+before it settles. Hovering snaps a card further out and inverts it to solid
+amber. Opening a device list throws the hand back into him and deals a new one
+with a BACK card; Escape backs out a level before it closes.
 
-It replaced a `TrackPopupMenu`, which was the last piece of Windows visibly
-bolted onto a character who exists because we refused the system's window
-chrome. The icons are line art drawn from primitives rather than bitmaps, so
-they stay sharp at any DPI and a character package does not have to ship menu
-artwork to get a menu that looks deliberate.
+It is drawn by the same compositor that draws him, on a second layered window.
+That is the point: a `TrackPopupMenu` — grey slab, system font, system spacing
+— was the last piece of Windows visibly bolted onto a character who exists
+because we refused the system's window chrome.
 
-Two things that bite, both fixed:
+Everything is primitives: skewed quads, lines, and glyph coverage sheared to
+match the lean, so the labels belong to the cards instead of floating on top of
+them. The icons are line art for the same reason — sharp at any DPI, and a
+character package needs no menu artwork at all.
+
+Three things that bite, all fixed and all tested:
 
 - **The companion must not raise himself while his menu is open.** Both windows
   are topmost, and whichever asked most recently wins — so the slow
-  always-on-top re-assert would put the character in front of the list he had
-  just opened. The raise stands down while a menu is up, and the menu claims
-  the top of the band explicitly once it exists.
-- **Row entrances must normalise against their own delay.** Dividing by a fixed
-  span instead leaves the rows near the bottom of a long menu — exactly the
-  device lists — permanently dimmed and slightly offset, having never finished
-  arriving. There is a test for it.
+  always-on-top re-assert put the character in front of the list he had just
+  opened. The raise stands down while a menu is up, and the menu claims the top
+  of the band explicitly once it exists.
+- **Card entrances must normalise against their own delay.** Dividing by a
+  fixed span instead leaves the last cards of a long device list permanently
+  short of their slot, having never arrived.
+- **The overshoot curve must be pinned at its endpoints.** It is only
+  *algebraically* 0 and 1 there; in `f32` it lands a whisker off, which leaves
+  a settled card a fraction of a pixel from its slot and the animation never
+  quite still.
 
 ## Audio devices
 

@@ -392,17 +392,20 @@ unsafe extern "system" fn wndproc(
             if let Some(state) = state_of(hwnd) {
                 let entries = state.shared.host.menu();
                 if !entries.is_empty() {
-                    let mut cursor = POINT { x: 0, y: 0 };
-                    GetCursorPos(&mut cursor);
-                    // His own menu, drawn by the same compositor that draws
-                    // him — not a system popup bolted to the side of him.
-                    flyout::open(
-                        &entries,
-                        &state.name,
-                        cursor.x,
-                        cursor.y,
-                        state.shared.host.clone(),
+                    // The cards are dealt from *him*, not from the cursor, so
+                    // the menu belongs to the character rather than to the
+                    // click — and his position decides which side they fly to.
+                    let (x, y) = (
+                        state.shared.x.load(Ordering::Relaxed),
+                        state.shared.y.load(Ordering::Relaxed),
                     );
+                    let rect = RECT {
+                        left: x,
+                        top: y,
+                        right: x + state.size.0,
+                        bottom: y + state.size.1,
+                    };
+                    flyout::open(&entries, &state.name, rect, state.shared.host.clone());
                 }
             }
             return 0;

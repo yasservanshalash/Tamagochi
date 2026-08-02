@@ -223,6 +223,102 @@ impl<'a> Canvas<'a> {
         }
     }
 
+    /// A filled parallelogram: a rectangle whose top edge is pushed `skew`
+    /// pixels right of its bottom edge.
+    ///
+    /// The slant is the whole visual identity of the floating menu — square
+    /// panels read as a dialog, leaning ones read as a card thrown onto the
+    /// screen. Rows are filled individually with the ends anti-aliased, which
+    /// is enough at these sizes and avoids a general polygon rasteriser.
+    pub fn fill_skewed(&mut self, x: f32, y: f32, w: f32, h: f32, skew: f32, color: Px) {
+        if w <= 0.0 || h <= 0.0 {
+            return;
+        }
+        let y0 = (y.floor() as i32).max(0);
+        let y1 = ((y + h).ceil() as i32).min(self.h);
+        for py in y0..y1 {
+            let centre = py as f32 + 0.5;
+            // Vertical coverage, so the top and bottom edges are not jagged.
+            let vcov = ((centre - y + 0.5).clamp(0.0, 1.0))
+                .min((y + h - centre + 0.5).clamp(0.0, 1.0));
+            if vcov <= 0.0 {
+                continue;
+            }
+            let frac = ((centre - y) / h).clamp(0.0, 1.0);
+            let left = x + skew * (1.0 - frac);
+            let right = left + w;
+            let px0 = (left.floor() as i32).max(0);
+            let px1 = ((right).ceil() as i32).min(self.w);
+            for px in px0..px1 {
+                let c = px as f32 + 0.5;
+                let hcov = ((c - left + 0.5).clamp(0.0, 1.0))
+                    .min((right - c + 0.5).clamp(0.0, 1.0));
+                let cov = hcov * vcov;
+                if cov <= 0.0 {
+                    continue;
+                }
+                self.blend(px, py, scale_alpha(color, (cov * 255.0).round() as u8));
+            }
+        }
+    }
+
+    /// Outline of the same parallelogram.
+    pub fn stroke_skewed(
+        &mut self,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        skew: f32,
+        thickness: f32,
+        color: Px,
+    ) {
+        let (tl, tr) = ((x + skew, y), (x + skew + w, y));
+        let (bl, br) = ((x, y + h), (x + w, y + h));
+        self.stroke_line(tl.0, tl.1, tr.0, tr.1, thickness, color);
+        self.stroke_line(bl.0, bl.1, br.0, br.1, thickness, color);
+        self.stroke_line(tl.0, tl.1, bl.0, bl.1, thickness, color);
+        self.stroke_line(tr.0, tr.1, br.0, br.1, thickness, color);
+    }
+
+    /// Composite a coverage map with the same lean as the chip it sits on, so
+    /// the label belongs to the card instead of floating on top of it.
+    pub fn blit_coverage_skewed(
+        &mut self,
+        cov: &[u8],
+        cw: i32,
+        ch: i32,
+        dx: f32,
+        dy: f32,
+        skew: f32,
+        color: Px,
+    ) {
+        if color >> 24 == 0 || ch <= 0 || cw <= 0 {
+            return;
+        }
+        for y in 0..ch {
+            let ty = dy + y as f32;
+            let row = ty.round() as i32;
+            if row < 0 || row >= self.h {
+                continue;
+            }
+            let frac = y as f32 / ch as f32;
+            let xo = dx + skew * (1.0 - frac);
+            for x in 0..cw {
+                let c = cov[(y as usize) * (cw as usize) + x as usize];
+                if c == 0 {
+                    continue;
+                }
+                let tx = (xo + x as f32).round() as i32;
+                if tx < 0 || tx >= self.w {
+                    continue;
+                }
+                let i = (row as usize) * (self.w as usize) + tx as usize;
+                self.px[i] = over(self.px[i], scale_alpha(color, c));
+            }
+        }
+    }
+
     /// Anti-aliased line segment with round caps.
     ///
     /// Every glyph the menu draws — chevrons, ticks, the little icons — is
@@ -426,6 +522,38 @@ mod tests {
         c.blit_coverage(&cov, 4, 4, 0, 0, rgba(255, 255, 255, 255));
         assert_eq!(c.get(0, 0) >> 24, 0);
         assert_eq!(c.get(1, 0) >> 24, 255);
+    }
+
+    #[test]
+    fn a_skewed_fill_leans_the_way_it_is_told() {
+        // Top edge pushed right of the bottom edge: the lean that makes the
+        // menu read as a thrown card rather than a dialog.
+        let mut buf = canvas(40, 20);
+        let mut c = Canvas::new(&mut buf, 40, 20);
+        c.fill_skewed(4.0, 2.0, 16.0, 16.0, 10.0, rgba(255, 255, 255, 255));
+        assert!(c.get(16, 3) >> 24 > 200, "top row sits right");
+        assert_eq!(c.get(6, 3) >> 24, 0, "and not left");
+        assert!(c.get(6, 16) >> 24 > 200, "bottom row sits left");
+        assert_eq!(c.get(24, 16) >> 24, 0, "and not right");
+    }
+
+    #[test]
+    fn a_skewed_fill_with_no_skew_is_just_a_rectangle() {
+        let mut buf = canvas(20, 20);
+        let mut c = Canvas::new(&mut buf, 20, 20);
+        c.fill_skewed(5.0, 5.0, 10.0, 10.0, 0.0, rgba(255, 255, 255, 255));
+        assert!(c.get(10, 6) >> 24 > 200);
+        assert!(c.get(6, 14) >> 24 > 200);
+        assert_eq!(c.get(2, 10) >> 24, 0);
+    }
+
+    #[test]
+    fn a_skewed_fill_off_canvas_is_clipped_not_fatal() {
+        let mut buf = canvas(8, 8);
+        let mut c = Canvas::new(&mut buf, 8, 8);
+        c.fill_skewed(-40.0, -40.0, 10.0, 10.0, 6.0, rgba(255, 255, 255, 255));
+        c.fill_skewed(100.0, 2.0, 10.0, 4.0, 6.0, rgba(255, 255, 255, 255));
+        assert!(buf.iter().all(|p| *p == 0));
     }
 
     #[test]
