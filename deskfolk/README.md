@@ -256,8 +256,29 @@ sound — and it cost a long debugging session.
 
 He opens his ear, you say your piece, and he answers when you stop — a short
 run of silence ends the turn. There is no second click, no send button, and no
-mode to get stuck in. Say nothing and he closes the mic after three seconds and
+mode to get stuck in. Say nothing and he closes the mic after four seconds and
 treats it as the poke it was; click again mid-turn and he drops it.
+
+He moves through three states while that happens, and each one is a different
+pose and a different subtitle:
+
+| | What is happening | How long |
+|---|---|---|
+| **listening** | the mic is open | until you stop talking |
+| **thinking** | transcription, then the model | seconds, and more on a local model |
+| **speaking** | the reply, out loud | as long as the line takes |
+
+The middle one was missing at first, and it read as a bug: he held the
+listening pose all the way through transcription and inference, so he looked
+like he was still waiting for you to speak when he was already working on the
+answer. Every failure path lands back at idle — including the awkward one where
+the mic heard you fine and the brain then could not be reached, which used to
+leave him thinking forever.
+
+There is a short pause between clicking and him actually being able to hear
+you: the input device has to open, and then 200ms goes on measuring the room
+(see below). It is not him being slow to react — until that finishes there is
+no bar to compare your voice against.
 
 This replaced the alpha's flow, which was open the mic, speak, then find him
 again and click to send. That asks you to do something nobody you are talking
@@ -299,13 +320,21 @@ measured, not assumed: the first 280ms establishes the room's noise floor and
 speech is whatever sits clearly above it — a fixed margin in a quiet room, a
 quarter of the floor again in a loud one.
 
-The floor is the **median** of those samples, not the loudest. `level` is a
-peak over one audio callback, so it spikes on any transient — a key press, the
-first frame after the device opens. Taking the maximum let one of those set the
-floor: a headset genuinely idling at **2** calibrated to **44**, and the bar was
-then clamped *below* its own floor, so the room itself counted as speech, the
-turn never ended on silence, and he sent whatever the ceiling cut off. That is
-what "sometimes the mic isn't picking it up" actually was.
+The floor is a **low percentile** of those samples, and it has to dodge a
+failure in each direction.
+
+`level` is a peak over one audio callback, so it spikes on any transient — a key
+press, the first frame after the device opens. Taking the *maximum* let one of
+those set the floor: a headset genuinely idling at **2** calibrated to **44**,
+and the bar was then clamped *below* its own floor, so the room itself counted
+as speech, the turn never ended on silence, and he sent whatever the ceiling cut
+off. That is what "sometimes the mic isn't picking it up" actually was.
+
+The other direction is starting to talk immediately, which people do, because
+they clicked him in order to say something. Then a *middle* sample is your own
+voice, the floor is your speaking level, and the bar goes above you — he sits
+there with his ear open hearing nothing. A quarter-percentile leans on the quiet
+gaps that exist even in continuous speech.
 
 Every turn logs its floor, its bar and the peak it reached, because "he did not
 hear me" is otherwise impossible to tell from "he heard me and had nothing to

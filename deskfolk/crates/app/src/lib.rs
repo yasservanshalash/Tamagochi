@@ -293,7 +293,7 @@ fn boot_companion(app: &AppHandle) -> anyhow::Result<()> {
             mind::remember_exchange(&mind, &h.heard, &h.say);
             let has_audio = voice.speak(&h.say);
             let mut guard = rt.lock();
-            guard.engine.stop_listening();
+            guard.engine.settle();
             guard.inputs.voice_pending = has_audio;
             let emotion = if h.emotion.is_empty() { "talk".to_string() } else { h.emotion };
             let _ = guard.engine.apply_reply(&deskfolk_engine::Reply {
@@ -305,11 +305,17 @@ fn boot_companion(app: &AppHandle) -> anyhow::Result<()> {
             });
         }) as Arc<dyn Fn(ear::Heard) + Send + Sync>
     };
-    // Nothing said, or the brain could not be reached: close his ear quietly
-    // rather than leaving him waiting with the subtitle up.
+    // Nothing said, or the brain could not be reached: come back to rest
+    // rather than holding whichever pose the turn died in.
     let on_idle = {
         let rt = rt.clone();
-        Arc::new(move || rt.lock().engine.stop_listening()) as Arc<dyn Fn() + Send + Sync>
+        Arc::new(move || rt.lock().engine.settle()) as Arc<dyn Fn() + Send + Sync>
+    };
+    // You stopped talking. Transcription and a local model take seconds, and
+    // he should look like he is working on it rather than still waiting.
+    let on_thinking = {
+        let rt = rt.clone();
+        Arc::new(move || rt.lock().engine.begin_thinking()) as Arc<dyn Fn() + Send + Sync>
     };
     // He heard his name: put his ear up straight away, so the listening ring
     // appears while the rest of the sentence is still arriving.
@@ -320,7 +326,7 @@ fn boot_companion(app: &AppHandle) -> anyhow::Result<()> {
     let ear = Arc::new(Ear::new(
         config::resolve_voice(),
         audio_settings.clone(),
-        ear::Ears { on_reply, on_idle, on_wake },
+        ear::Ears { on_reply, on_idle, on_wake, on_thinking },
     ));
 
     app.manage(AppState {

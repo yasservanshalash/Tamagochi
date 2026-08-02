@@ -373,6 +373,19 @@ impl Engine {
         self.subtitle = None;
     }
 
+    /// Come back to rest from a turn that went nowhere.
+    ///
+    /// Broader than [`Engine::stop_listening`] because a turn can fail at
+    /// either end: the mic hears nothing, or it hears you and the brain then
+    /// cannot be reached. Leaving him in the thinking pose after the second
+    /// one is how he ends up staring into space forever.
+    pub fn settle(&mut self) {
+        if matches!(self.state, State::Listening | State::Thinking) {
+            self.state = State::Idle;
+            self.subtitle = None;
+        }
+    }
+
     pub fn begin_thinking(&mut self) {
         self.state = State::Thinking;
         let think = self.pkg.role_clip(Role::Think).to_string();
@@ -1237,6 +1250,36 @@ mod tests {
         e.begin_thinking();
         e.stop_listening();
         assert_eq!(e.state(), State::Thinking, "must not stomp another state");
+    }
+
+    #[test]
+    fn a_turn_that_dies_while_he_is_thinking_still_settles() {
+        // The mic heard you, he went away to think, and the brain never
+        // answered. Without this he holds the thinking pose forever.
+        let mut e = engine();
+        let input = Inputs { local_hour: 12, ..Default::default() };
+        e.begin_thinking();
+        e.settle();
+        assert_eq!(e.state(), State::Idle);
+        assert!(e.frame(&input).subtitle.is_none());
+    }
+
+    #[test]
+    fn settling_also_closes_his_ear() {
+        let mut e = engine();
+        e.begin_listening();
+        e.settle();
+        assert_eq!(e.state(), State::Idle);
+    }
+
+    #[test]
+    fn settling_never_interrupts_him_mid_sentence() {
+        // Speaking and asleep are states a failed turn has no business
+        // touching — he may already be answering the previous thing.
+        let mut e = engine();
+        e.sleep();
+        e.settle();
+        assert_eq!(e.state(), State::Asleep, "must not wake him");
     }
 
     #[test]

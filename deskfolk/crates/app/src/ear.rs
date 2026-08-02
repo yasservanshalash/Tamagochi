@@ -29,7 +29,11 @@ use serde::Deserialize;
 use crate::audio::{AudioSettings, Recorder, SOURCE_RATE};
 
 /// How long to sample the room before deciding what speech sounds like.
-const CALIBRATE_MS: u64 = 280;
+///
+/// Every millisecond here is dead time between clicking him and him being able
+/// to hear you, so it is as short as it can be while still holding enough
+/// samples to be worth a percentile.
+const CALIBRATE_MS: u64 = 200;
 /// Speech must clear the noise floor by at least this much, on a 0..=100 peak
 /// scale — and by a quarter of the floor again in a room that is already loud,
 /// since noise that loud fluctuates by more than a fixed margin.
@@ -97,6 +101,13 @@ pub struct Ears {
     pub on_idle: Arc<dyn Fn() + Send + Sync>,
     /// He heard his name and is about to take a turn.
     pub on_wake: Arc<dyn Fn() + Send + Sync>,
+    /// You have finished talking and he has gone away to think about it.
+    ///
+    /// This matters more than it sounds: transcription plus a local model is
+    /// several seconds, and without it he holds the listening pose through all
+    /// of them — so he looks like he is still waiting for you to speak when he
+    /// is actually working on the answer.
+    pub on_thinking: Arc<dyn Fn() + Send + Sync>,
 }
 
 impl Ear {
@@ -265,6 +276,9 @@ fn take_turn(
         return;
     };
 
+    // He has your sentence; everything from here is him working on it.
+    (ears.on_thinking)();
+
     match converse(client, base, hour, pcm) {
         Some(reply) => {
             tracing::info!("mic: heard {:?}", reply.heard);
@@ -414,7 +428,7 @@ fn record_turn(
                 }
             }
             if started.elapsed() >= Duration::from_millis(CALIBRATE_MS) {
-                floor = median(&mut samples);
+                floor = quiet_level(&mut samples);
                 let t = speech_bar(floor);
                 tracing::info!(
                     "mic: noise floor {floor} (of {} samples, loudest {}), speech above {t}",
@@ -482,20 +496,26 @@ fn record_turn(
     }
 }
 
-/// The room's resting level, as a median rather than a maximum.
+/// The room's resting level: a low percentile of what was heard, not the peak.
 ///
-/// `level` is a *peak* over one audio callback, so it spikes on any transient
-/// — a key press, a chair creak, the first frame after the device opens. Taking
-/// the loudest sample in the window let one of those set the floor: a headset
-/// idling at 3 calibrated to 44, and the bar was then clamped *below* its own
-/// floor, so everything read as speech and the turn could only end at the
-/// ceiling. The median ignores the spike and describes the room.
-fn median(samples: &mut [u8]) -> u8 {
+/// Two failures to avoid, in opposite directions.
+///
+/// `level` is a *peak* over one audio callback, so it spikes on any transient —
+/// a key press, a chair creak, the first frame after the device opens. Taking
+/// the loudest sample let one of those set the floor: a headset idling at 2
+/// calibrated to 44, and the bar then sat above anything a person would say.
+///
+/// The other is starting to talk immediately, which people do, because they
+/// just clicked him to say something. Then a *middle* sample is your own voice,
+/// the floor is your speaking level, and the bar goes above you — he sits there
+/// with his ear open hearing nothing. A quarter-percentile leans on the quiet
+/// gaps that exist even in continuous speech.
+fn quiet_level(samples: &mut [u8]) -> u8 {
     if samples.is_empty() {
         return 0;
     }
     samples.sort_unstable();
-    samples[samples.len() / 2]
+    samples[samples.len() / 4]
 }
 
 /// How loud something has to be to count as speech in a room this noisy.
@@ -552,23 +572,34 @@ mod tests {
     #[test]
     fn one_transient_cannot_set_the_noise_floor() {
         // A key press mid-calibration is a single loud sample among quiet
-        // ones. Taking the loudest is how a headset idling at 3 calibrated
+        // ones. Taking the loudest is how a headset idling at 2 calibrated
         // to 44.
         let mut quiet_room_with_a_click = [3, 2, 3, 44, 3, 2, 3];
-        assert_eq!(median(&mut quiet_room_with_a_click), 3);
+        assert!(quiet_level(&mut quiet_room_with_a_click) <= 3);
+    }
+
+    #[test]
+    fn talking_straight_away_does_not_deafen_him() {
+        // People click him *because* they have something to say, so half the
+        // calibration window can be their own voice. A middle sample would
+        // then be speech, and the bar would go above the speaker.
+        let mut talking_immediately = [3, 30, 35, 2, 33, 31, 4, 36];
+        let floor = quiet_level(&mut talking_immediately);
+        assert!(floor <= 5, "floor {floor} was set from the speaker's voice");
+        assert!(speech_bar(floor) < 30, "bar would sit above normal speech");
     }
 
     #[test]
     fn a_genuinely_loud_room_still_reads_as_loud() {
-        // The median must not simply discard high readings — only isolated
-        // ones. A room that is loud throughout should calibrate loud.
+        // It must not simply discard high readings — only unrepresentative
+        // ones. A room loud throughout should calibrate loud.
         let mut loud = [40, 44, 41, 43, 45, 42, 44];
-        assert!(median(&mut loud) >= 40);
+        assert!(quiet_level(&mut loud) >= 40);
     }
 
     #[test]
     fn an_empty_calibration_does_not_panic() {
-        assert_eq!(median(&mut []), 0);
+        assert_eq!(quiet_level(&mut []), 0);
     }
 
     #[test]
@@ -600,6 +631,7 @@ mod tests {
                 on_reply: Arc::new(|_| {}),
                 on_idle: Arc::new(|| {}),
                 on_wake: Arc::new(|| {}),
+                on_thinking: Arc::new(|| {}),
             },
         );
         assert!(!ear.is_enabled());
