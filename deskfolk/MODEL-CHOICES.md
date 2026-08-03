@@ -85,7 +85,7 @@ pcm will not decode through ffmpeg; **`microsoft/mai-voice-2`** rejects every
 voice id I could find and does not publish a list.
 
 Samples of everything that worked are in
-`.claude/jobs/581c98a2/tmp/voices` — go and listen, because I can measure
+`<repo>/.claude/jobs/581c98a2/tmp/voices` — go and listen, because I can measure
 latency but I cannot judge whether a voice sounds like *him*.
 
 ---
@@ -119,7 +119,7 @@ Two real problems with the **free** variant specifically:
    template. The brain would have put "str" in his speech bubble. Two of three
    runs were fine, but that is a failure mode you will see.
 2. **Free endpoints and your private data.** This companion keeps a
-   `facts` list about your life in `yasser_memory.json` and sends recent turns
+   `facts` list about your life in `../brain/yasser_memory.json` and sends recent turns
    with every request. Free model endpoints commonly come with a data-sharing
    condition attached — check your privacy settings at
    openrouter.ai/settings/privacy before you point a companion that remembers
@@ -146,7 +146,7 @@ conversation stays on your machine.
 ## Your friend's other suggestion: ElevenLabs
 
 Best-in-class voice, and genuinely the only option here that can **clone a
-voice** — you have Troy samples sitting in `brain/tts_cache`, so "keep the
+voice** — you have Troy samples sitting in `../brain/tts_cache`, so "keep the
 voice you already like" is only possible with something like this.
 
 But look at the numbers:
@@ -200,7 +200,7 @@ All well inside €15 except the ElevenLabs route.
 
 ## How to change any of it
 
-Everything is `brain/.env`, then restart the brain. No code changes.
+Everything is `../brain/.env`, then restart the brain. No code changes.
 
 ```bash
 # --- TTS ---

@@ -367,6 +367,14 @@ mic: turn ended — 1.6s, peak 37 (floor 2)
 The rest, all in `ear.rs`: speech must hold for 110ms, a turn ends after 1s of
 silence, and it gives up after 4s of nothing or 25s of anything.
 
+## Which models to use
+
+[`MODEL-CHOICES.md`](MODEL-CHOICES.md) compares the speech-to-text, language
+and text-to-speech options with measured latency and real prices — eleven STT
+models, nine TTS, three minds, timed on real round trips rather than quoted
+from spec sheets. Short version: the voice and the hearing are both under two
+seconds now, so the mind is the whole wait.
+
 ## The voice
 
 He speaks. Every reply is sent to the brain, which streams PCM back sentence by
