@@ -12,32 +12,50 @@ Test clip for STT (3.3s): *"Yo, testing 1, 2. This is the voice check."*
 
 ---
 
-## The short version
+## The stack, for about €12/month
 
-| Layer | Running now | Why |
-|---|---|---|
-| **STT** | `mistralai/voxtral-mini-transcribe` | 0.35s — twice as fast as anything else, read the line correctly |
-| **LLM** | `mistral-heretic` (local, Ollama) | Free, private, uncensored — but **6–10s, and it is now the whole wait** |
-| **TTS** | `x-ai/grok-voice-tts-1.0` voice `leo` | 1.52s — fastest that worked |
+Installed and running. Chosen for how convincing he sounds, inside a €20
+ceiling, with room left over.
 
-**The one change worth making:** the LLM. It is 6–10 seconds of a roughly
-8–12 second round trip. Everything else is already under two seconds.
+| Layer | Model | Measured | Cost/month |
+|---|---|---|---|
+| **STT** | `mistralai/voxtral-mini-transcribe` | 0.35s | ~$0.50 |
+| **Mind** | `nvidia/nemotron-3-super-120b-a12b` (paid) | 2.3–6.2s | ~$0.60 |
+| **TTS** | `minimax/speech-2.8-turbo`, voice `English_Trustworth_Man` | 1.73s | ~$12 |
+| | | | **≈ $13 / €12** |
+
+**Want the rest of the budget spent on the voice?** One line:
+`PET_GROQ_TTS_MODEL=minimax/speech-2.8-hd` — 1.48s, $100/1M ≈ **$20/month**,
+the most expressive thing reachable from your existing key. That takes the
+total to about €19 and leaves nothing spare, which is fine for development but
+worth knowing.
+
+### What that changed
+
+Full round trip through `/pet/converse` — hear, think, reply:
+
+```
+  before   11.9s      local model + Groq voice
+  after     3.4s      measured twice: 3.54s, 3.38s
+```
+
+The wait went from *awkward* to *conversational*. Most of it was the mind, not
+the voice — the local 24B was 6–10s of it.
 
 ---
 
-## Where the time actually goes
-
-Measured end to end through `/pet/converse` (hear → think → reply): **11.9s**.
+## Where the time goes now
 
 ```
   1.0s   silence detection (he waits to be sure you finished)
   0.35s  speech to text
-  6-10s  the model            <-- 70-85% of the wait
-  1.5s   text to speech
+  ~1.5s  the mind          <-- was 6-10s
+  1.7s   text to speech
 ```
 
-Cutting TTS from 4.8s to 1.5s was worth doing. Cutting the model from 8s to 3s
-would be worth twice as much.
+Nothing left is an obvious win. The next-largest number is the second of
+silence he waits before deciding you have finished, and shortening that makes
+him cut you off mid-thought.
 
 ---
 
@@ -68,11 +86,89 @@ Whisper at $0.04/hr is still unbeaten and it is one line to switch back.
 
 ---
 
-## Text to speech
+## Making him sound real
+
+This is the part worth spending on, so it gets its own section.
+
+### What the benchmarks say
+
+- **Inworld** currently leads on overall realism and subtle emotional nuance.
+- **ElevenLabs v3** (March 2026) is their most expressive model — built for
+  narration and character work, explicitly *not* for real-time, with latency
+  over 300ms by design.
+- **Orpheus 3B** scores in the *same band as ElevenLabs Multilingual v2* in
+  blind English tests, and is the only option here with **inline emotion tags
+  that actually fire**: `<laugh>` `<sigh>` `<cough>` `<sniffle>` `<groan>`
+  `<yawn>` `<gasp>`. For a character with a personality that is a real lever —
+  he can laugh mid-sentence rather than saying "haha".
+- **MiniMax** is the price-to-performance pick, with emotion control that
+  competes with far more expensive flagships.
+
+### The shortlist, same line, same day
+
+*"Yo, you actually think they ain't listening? Man, check the router logs
+sometime. I'm just sayin'."* — samples in
+`<repo>/.claude/jobs/581c98a2/tmp/shortlist`, go and listen. I can time these;
+I cannot tell you which one sounds like **him**.
+
+| Model | Time | /1M chars | At ~200k chars | Note |
+|---|---|---|---|---|
+| `minimax/speech-2.8-hd` | **1.48s** | $100 | $20 | most expressive reachable today |
+| `fish-audio/s2-pro` | **1.30s** | $15 | $3 | fastest of the lot |
+| **`minimax/speech-2.8-turbo`** ← active | 1.73s | $60 | **$12** | the balance |
+| `x-ai/grok-voice-tts-1.0` `leo` | 1.94s | $15 | $3 | best cheap option |
+| `fish-audio/s2.1-pro` | 2.04s | $15 | $3 | |
+| `canopylabs/orpheus-3b-0.1-ft` `leo` | 5.69s | $7 | $1.40 | **emotion tags**, but slow here |
+| `canopylabs/orpheus-3b-0.1-ft` `dan` | 6.79s | $7 | $1.40 | |
+
+**On Orpheus:** the quality and the emotion tags make it the most *interesting*
+option, and it is the cheapest of the serious ones. It is not active only
+because 5–7 seconds of synthesis undoes everything gained by moving the mind
+off the local machine. If you find a faster host for it — Baseten is Canopy's
+own inference partner, DeepInfra runs it at the same $7 — it becomes the
+obvious pick.
+
+### The two worth paying for, off-platform
+
+Neither is on OpenRouter, so both mean a separate account and a little
+integration work. `PET_TTS_URL` already accepts any OpenAI-compatible
+endpoint, so it is configuration if they speak that shape.
+
+**Inworld** — the realism leader, and the interesting one for you:
+
+| | |
+|---|---|
+| Realtime TTS-2 | $25/1M → **$5/month** at your usage |
+| Realtime TTS 1.5 Mini | $5/1M, <130ms latency |
+| **Voice cloning** | **free** — you pay only for synthesis |
+
+That last row matters more than the price. You have Troy samples sitting in
+`../brain/tts_cache`. Free cloning is the only route on this whole page that
+gets you **the voice you already liked** rather than a new one to get used to.
+If "full potential" means *his* voice, this is the door.
+
+**ElevenLabs** — best-in-class, and the wrong shape for this:
+
+| Tier | Cost | Credits | Lines/day at 66 chars |
+|---|---|---|---|
+| Free | $0 | 10,000 | 5 — no commercial licence |
+| Starter | $6 | 30,000 | 15 |
+| Creator | $22 | 121,000 | 61 |
+| Pro | $99 | 600,000 | 300 |
+
+Flash v2.5 is $50/1M with ~75ms latency; v3 is more expressive but over 300ms
+and not meant for real time. The problem is the billing shape: **$22/month for
+61 lines a day**, against $12 for effectively unlimited on MiniMax. It is
+subscription credits, not usage, so quiet days do not bank. Revisit it when
+the voice *is* the product.
+
+---
+
+## Text to speech — everything tested
 
 | Model | Time | Price /1M chars | Notes |
 |---|---|---|---|
-| **`x-ai/grok-voice-tts-1.0`** ← active | **1.52s** | $15 | voice `leo` |
+| `x-ai/grok-voice-tts-1.0` | **1.52s** | $15 | voice `leo` |
 | `fish-audio/s2.1-pro-free:free` | 1.70s | **free** | omit the voice setting entirely |
 | `canopylabs/orpheus-3b-0.1-ft` | 3.53s | $7 | voices `leo` `dan` `zac`; same family as Groq's Troy |
 | `deepgram/aura-2` | — | $30 | needs `aura-2-apollo-en` style ids |
@@ -90,11 +186,13 @@ latency but I cannot judge whether a voice sounds like *him*.
 
 ---
 
-## The LLM — this is the one to change
+## The mind — the change that mattered
 
-Currently `mistral-heretic` locally through Ollama. It was chosen deliberately:
+Was `mistral-heretic` locally through Ollama, now
+`nvidia/nemotron-3-super-120b-a12b`. The local model was chosen deliberately:
 ordinary assistant models kept breaking the persona, and running locally means
-your conversations never leave the machine.
+your conversations never leave the machine. That second point is still the one
+good argument for going back, and two lines in `../brain/.env` do it.
 
 The cost is speed. Measured on `/pet/think`: **6.3s and 9.5s**. Note the model
 itself answers a trivial prompt in **0.32s** — the time goes on the persona
@@ -185,18 +283,20 @@ worth real money. Today, on one desktop, it is not.
 
 ## What this costs you per month
 
-At your measured usage — 99 lines, 6,529 characters in a heavy session:
+At your measured usage — 99 lines, 6,529 characters in a heavy session, call it
+200,000 characters a month with development testing on top:
 
-| Setup | Monthly |
-|---|---|
-| **Now** (local LLM + OpenRouter STT/TTS) | **~$3** |
-| Recommended (paid Nemotron + OpenRouter STT/TTS) | **~$4** |
-| With ElevenLabs Creator instead | **~$25**, and capped at 61 lines/day |
-| Groq only, as it was | blocked — 3,600 chars/day, upgrade closed |
+| Setup | Monthly | Round trip |
+|---|---|---|
+| Where you started (Groq only) | blocked at 3,600 chars/day | 11.9s |
+| **Installed now** (Voxtral + Nemotron + MiniMax Turbo) | **~$13 / €12** | **3.4s** |
+| Same, with MiniMax **HD** for the voice | ~$21 / €19 | ~3.2s |
+| Cheapest that is still good (Voxtral + Nemotron + grok-voice) | ~$4 / €4 | ~3.6s |
+| With ElevenLabs Creator instead | ~$23, capped at 61 lines/day | ~2.9s |
+| Fully local and private (Ollama + Kokoro) | **$0** | ~12s |
 
-All well inside €15 except the ElevenLabs route.
+Everything except the ElevenLabs route sits inside €20.
 
----
 
 ## How to change any of it
 
@@ -230,13 +330,20 @@ the voice.
 
 ---
 
-## What I would do, in order
+## What I would do next
 
-1. **Move the LLM to paid Nemotron.** Biggest win available: roughly halves the
-   wait, costs about 60 cents a month.
-2. **Trim `HISTORY_TURNS` from 16 to 8** in `crates/app/src/mind.rs`. Free, and
-   every request carries half the prompt.
-3. **Leave STT and TTS alone.** Both are already under two seconds and under
-   four dollars a month combined.
-4. **Revisit ElevenLabs when you ship**, not before — and specifically for
-   voice cloning, which is the one thing nothing else here can do.
+1. **Listen to the shortlist** in `<repo>/.claude/jobs/581c98a2/tmp/shortlist`
+   and pick the voice. That is the one decision I genuinely cannot make for
+   you — every option there is fast enough and inside budget, so it comes down
+   to which one sounds like him.
+2. **Try `minimax/speech-2.8-hd`** for a day. One line, and it is the most
+   expressive thing your existing key can reach. If you cannot hear the
+   difference from Turbo, keep the €8.
+3. **Look at Inworld** if the answer is "I want Troy back". Free voice cloning
+   against the samples in `../brain/tts_cache` is the only path to the exact
+   voice, and at $5-25/1M it is cheaper than ElevenLabs.
+4. **Trim `HISTORY_TURNS` from 16 to 8** in `crates/app/src/mind.rs`. Free, and
+   every request currently carries sixteen turns of prompt.
+5. **Keep Ollama installed.** The local mind is slower, but it is the only
+   configuration where a companion that remembers your life never sends any of
+   it anywhere. Two lines in `../brain/.env` switch back.
