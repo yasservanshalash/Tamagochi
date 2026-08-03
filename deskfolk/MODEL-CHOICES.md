@@ -20,9 +20,9 @@ ceiling, with room left over.
 | Layer | Model | Measured | Cost/month |
 |---|---|---|---|
 | **STT** | `mistralai/voxtral-mini-transcribe` | 0.35s | ~$0.50 |
-| **Mind** | `nvidia/nemotron-3-super-120b-a12b` (paid) | 2.3–6.2s | ~$0.60 |
+| **Mind** | `nousresearch/hermes-4-70b` | 0.71–1.02s | ~$0.90 |
 | **TTS** | `minimax/speech-2.8-turbo`, voice `English_Trustworth_Man` | 1.73s | ~$12 |
-| | | | **≈ $13 / €12** |
+| | | | **≈ $13.50 / €12** |
 
 **Want the rest of the budget spent on the voice?** One line:
 `PET_GROQ_TTS_MODEL=minimax/speech-2.8-hd` — 1.48s, $100/1M ≈ **$20/month**,
@@ -36,11 +36,11 @@ Full round trip through `/pet/converse` — hear, think, reply:
 
 ```
   before   11.9s      local model + Groq voice
-  after     3.4s      measured twice: 3.54s, 3.38s
+  after     1.4s      measured twice: 1.54s, 1.26s
 ```
 
-The wait went from *awkward* to *conversational*. Most of it was the mind, not
-the voice — the local 24B was 6–10s of it.
+Nine times faster. Almost all of it was the mind — the local 24B was 6–10s of
+that 11.9s, and it turned out the *uncensored* models are also the fast ones.
 
 ---
 
@@ -49,7 +49,7 @@ the voice — the local 24B was 6–10s of it.
 ```
   1.0s   silence detection (he waits to be sure you finished)
   0.35s  speech to text
-  ~1.5s  the mind          <-- was 6-10s
+  ~0.9s  the mind          <-- was 6-10s
   1.7s   text to speech
 ```
 
@@ -186,60 +186,65 @@ latency but I cannot judge whether a voice sounds like *him*.
 
 ---
 
-## The mind — the change that mattered
+## The mind — and staying uncensored
 
-Was `mistral-heretic` locally through Ollama, now
-`nvidia/nemotron-3-super-120b-a12b`. The local model was chosen deliberately:
-ordinary assistant models kept breaking the persona, and running locally means
-your conversations never leave the machine. That second point is still the one
-good argument for going back, and two lines in `../brain/.env` do it.
+This is an adult (18+) fiction character, so the model has to stay in character
+on crude material without moralising. That rules out most instruct models, and
+it turned out to rule out the first recommendation on this page.
 
-The cost is speed. Measured on `/pet/think`: **6.3s and 9.5s**. Note the model
-itself answers a trivial prompt in **0.32s** — the time goes on the persona
-prompt plus sixteen turns of history, and on the brain's anti-repeat reroll,
-which regenerates roughly **29% of replies** (15 of 52 in one session).
+Tested with a genuinely representative prompt — being asked to roast the user
+over a sexual anecdote — plus "be brutal about my ex" and "tell me something
+dark". Refusal, lecture or dropped character all count as a fail.
 
-### Your friend's suggestion: `nvidia/nemotron-3-super-120b-a12b:free`
+| Model | Time | Held character | $/M in · out |
+|---|---|---|---|
+| **`nousresearch/hermes-4-70b`** ← active | **0.71–1.02s** | yes, all three | $0.13 · $0.40 |
+| `cognitivecomputations/dolphin-mistral-24b-venice-edition` | 1.14–1.27s | yes | $0.20 · $0.90 |
+| `thedrummer/unslopnemo-12b` | 1.21s | yes, very crude | $0.40 · $0.40 |
+| `mistralai/mistral-large-2512` | 2.54s | yes | $0.50 · $1.50 |
+| `anthracite-org/magnum-v4-72b` | 3.74s | yes | $3.00 · $5.00 |
+| `sao10k/l3.3-euryale-70b` | **22.4s** | yes, but unusable | $0.65 · $0.75 |
+| `nvidia/nemotron-3-super-120b-a12b` | — | **returns nothing** | $0.085 · $0.40 |
 
-Tested it. **It is a good suggestion**, with caveats.
+### Correcting the Nemotron recommendation
 
-| | Result |
-|---|---|
-| Speed | **2.3s, 3.8s, 6.2s** across three runs — faster than local, but variable |
-| Persona | **Holds it.** Asked it to go off about someone stealing code, it swore in character and did not refuse |
-| Cost | Free tier: $0. Paid variant: **$0.085/M in, $0.40/M out ≈ $0.60/month** at your usage |
-| Context | 262k free / 1M paid — vastly more than the 16 turns you use |
+An earlier version of this page recommended
+`nvidia/nemotron-3-super-120b-a12b`. **That was wrong for this character.**
 
-Two real problems with the **free** variant specifically:
+It is not censorship — it is a *reasoning* model. On adult prompts it spends
+the entire token budget thinking and returns `finish_reason: length` with
+**empty content**. Nothing comes out at all. Setting `reasoning: {effort: low}`
+does not fix it. It was fine on the milder test that got it recommended
+(swearing about someone stealing code), which is exactly why the harder probe
+mattered.
 
-1. **It echoed the schema.** One run returned
-   `{"say":"str","emotion":"str","glitch":"int","action":"str"}` — literally the
-   template. The brain would have put "str" in his speech bubble. Two of three
-   runs were fine, but that is a failure mode you will see.
-2. **Free endpoints and your private data.** This companion keeps a
-   `facts` list about your life in `../brain/yasser_memory.json` and sends recent turns
-   with every request. Free model endpoints commonly come with a data-sharing
-   condition attached — check your privacy settings at
-   openrouter.ai/settings/privacy before you point a companion that remembers
-   personal things at one. Your current local setup has no such question.
+It also explains two things noticed earlier and blamed on the free tier: the
+variable 2.3–6.2s latency, and the run that echoed the JSON schema back. Both
+are reasoning tokens.
 
-**My recommendation: use the paid variant, not the free one.**
-`nvidia/nemotron-3-super-120b-a12b` is about **$0.60/month** at your usage —
-less than the TTS — and you get no queueing, no schema echoes from a
-contended endpoint, and a clear data policy. That is the single biggest
-improvement available to you: it should roughly halve the wait.
+### Why Hermes 4
 
-Also tested `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free`: it held the
-persona but took **87 seconds** on one run. It is a reasoning model. Do not use
-it for this.
+Fastest of everything tested, held character on all three probes including the
+darkest, returned clean JSON every time, and costs about **$0.90/month** at
+your usage. It is a steerable model rather than a refusing one — it does what
+the system prompt tells it.
 
-### If you switch, keep the local model installed
+`dolphin-mistral-24b-venice-edition` is the runner-up and worth knowing about:
+it is already the OpenRouter default in `crates/ai/../config.rs`, chosen for
+exactly this reason. Slightly slower, slightly dearer, equally willing.
 
-`PET_API_BASE` and `PET_MODEL` swap it in one line, so keep Ollama as the
-offline fallback. There is a real difference beyond speed: local means the
-conversation stays on your machine.
+Avoid `sao10k/l3.3-euryale-70b` despite its roleplay reputation — 22 seconds.
 
----
+### Going back to local
+
+`mistral-heretic` through Ollama is still the only configuration where a
+companion that remembers your life sends none of it anywhere. Two lines:
+
+```bash
+PET_API_BASE=http://localhost:11434/v1
+PET_MODEL=mistral-heretic
+```
+
 
 ## Your friend's other suggestion: ElevenLabs
 
@@ -289,9 +294,9 @@ At your measured usage — 99 lines, 6,529 characters in a heavy session, call i
 | Setup | Monthly | Round trip |
 |---|---|---|
 | Where you started (Groq only) | blocked at 3,600 chars/day | 11.9s |
-| **Installed now** (Voxtral + Nemotron + MiniMax Turbo) | **~$13 / €12** | **3.4s** |
-| Same, with MiniMax **HD** for the voice | ~$21 / €19 | ~3.2s |
-| Cheapest that is still good (Voxtral + Nemotron + grok-voice) | ~$4 / €4 | ~3.6s |
+| **Installed now** (Voxtral + Hermes 4 + MiniMax Turbo) | **~$13.50 / €12** | **1.4s** |
+| Same, with MiniMax **HD** for the voice | ~$21.50 / €19 | ~1.2s |
+| Cheapest that is still good (Voxtral + Hermes 4 + grok-voice) | ~$4.50 / €4 | ~1.6s |
 | With ElevenLabs Creator instead | ~$23, capped at 61 lines/day | ~2.9s |
 | Fully local and private (Ollama + Kokoro) | **$0** | ~12s |
 
@@ -315,9 +320,9 @@ PET_STT_CLOUD_URL=https://openrouter.ai/api/v1/audio/transcriptions
 PET_STT_CLOUD_KEY=${OPENROUTER_API_KEY}
 GROQ_STT_MODEL=mistralai/voxtral-mini-transcribe
 
-# --- LLM (the change I would make) ---
+# --- mind (uncensored, stays in character on adult material) ---
 PET_API_BASE=https://openrouter.ai/api/v1
-PET_MODEL=nvidia/nemotron-3-super-120b-a12b     # paid variant, not :free
+PET_MODEL=nousresearch/hermes-4-70b
 
 # --- safety net: local voice when the cloud one fails ---
 PET_TTS_FALLBACK=quota
