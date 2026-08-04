@@ -743,28 +743,36 @@
     "walk": {
       "frames": [
         {
-          "img": "img_y_hd_walk0",
-          "ms": 110
+          "img": "img_y_walkl0",
+          "ms": 100
         },
         {
-          "img": "img_y_hd_walk1",
-          "ms": 110
+          "img": "img_y_walkl1",
+          "ms": 100
         },
         {
-          "img": "img_y_hd_walk2",
-          "ms": 110
+          "img": "img_y_walkl2",
+          "ms": 100
         },
         {
-          "img": "img_y_hd_walk3",
-          "ms": 110
+          "img": "img_y_walkl3",
+          "ms": 100
         },
         {
-          "img": "img_y_hd_walk4",
-          "ms": 110
+          "img": "img_y_walkl4",
+          "ms": 100
         },
         {
-          "img": "img_y_hd_walk5",
-          "ms": 110
+          "img": "img_y_walkl5",
+          "ms": 100
+        },
+        {
+          "img": "img_y_walkl6",
+          "ms": 100
+        },
+        {
+          "img": "img_y_walkl7",
+          "ms": 100
         }
       ],
       "loop": true
@@ -772,28 +780,36 @@
     "walk_right": {
       "frames": [
         {
-          "img": "img_y_hd_walkr0",
-          "ms": 110
+          "img": "img_y_walkr0",
+          "ms": 100
         },
         {
-          "img": "img_y_hd_walkr1",
-          "ms": 110
+          "img": "img_y_walkr1",
+          "ms": 100
         },
         {
-          "img": "img_y_hd_walkr2",
-          "ms": 110
+          "img": "img_y_walkr2",
+          "ms": 100
         },
         {
-          "img": "img_y_hd_walkr3",
-          "ms": 110
+          "img": "img_y_walkr3",
+          "ms": 100
         },
         {
-          "img": "img_y_hd_walkr4",
-          "ms": 110
+          "img": "img_y_walkr4",
+          "ms": 100
         },
         {
-          "img": "img_y_hd_walkr5",
-          "ms": 110
+          "img": "img_y_walkr5",
+          "ms": 100
+        },
+        {
+          "img": "img_y_walkr6",
+          "ms": 100
+        },
+        {
+          "img": "img_y_walkr7",
+          "ms": 100
         }
       ],
       "loop": true

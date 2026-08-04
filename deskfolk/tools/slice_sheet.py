@@ -60,8 +60,37 @@ MIN_FRAME_W = 40
 FRAME_GAP = 2
 
 
+def looks_checkered(rgb):
+    """Is the 'transparency' a painted checkerboard rather than real alpha?
+
+    Generators often hand back an opaque image with the checkerboard *drawn
+    on*, which looks transparent and is not. It shows up as a large share of
+    near-neutral mid greys, which no part of this character wears — he is all
+    browns and tans, his trousers are darker than the band and his headphones
+    lighter.
+    """
+    return checker_mask(rgb).mean() > 0.25
+
+
+def checker_mask(rgb):
+    """True on the painted checkerboard.
+
+    Deliberately not flood-filled from the border. The squares are separated
+    by anti-aliased seams that a fill cannot cross, and the gaps *between his
+    legs* are enclosed anyway — a border fill leaves a grey strip standing
+    there. Classifying by colour alone is safe precisely because the band is
+    one he never occupies.
+    """
+    a = rgb.astype(int)
+    spread = a.max(axis=2) - a.min(axis=2)
+    value = a.mean(axis=2)
+    return (spread <= 14) & (value >= 116) & (value <= 208)
+
+
 def background_mask(rgb, tol):
     """True where the pixel is background reachable from the border."""
+    if looks_checkered(rgb):
+        return checker_mask(rgb)
     h, w, _ = rgb.shape
     bg = rgb[0, 0].astype(int)
     near = np.abs(rgb.astype(int) - bg).max(axis=2) <= tol
@@ -134,17 +163,28 @@ def cut_group(fg, y0, y1, x0, x1, want):
     return [(x0 + a, x0 + b) for a, b in found], how
 
 
-def main(sheet, outdir, contact=False):
+def main(sheet, outdir, contact=False, row=None, upscale=UPSCALE, prefix="hd_"):
     rgb = np.asarray(Image.open(sheet).convert("RGB"))
     fg = ~background_mask(rgb, TOLERANCE)
+    if looks_checkered(rgb):
+        print("background: painted checkerboard (not real alpha)")
 
     groups = []
-    for y0, y1, specs in LAYOUT:
-        for i, (name, xs, want) in enumerate(specs):
-            xe = specs[i + 1][1] if i + 1 < len(specs) else fg.shape[1]
-            cuts, how = cut_group(fg, y0, y1, xs, xe, want)
-            print(f"{name:14s} {len(cuts)} frames  [{how}]")
-            groups.append((name, y0, y1, cuts))
+    if row:
+        # One row, one animation — for a sheet that is a single cycle rather
+        # than a page of them, which is the shape worth asking a generator for
+        # when the frames need to be big.
+        name, y0, y1, want = row
+        cuts, how = cut_group(fg, y0, y1, 0, fg.shape[1], want)
+        print(f"{name:14s} {len(cuts)} frames  [{how}]")
+        groups.append((name, y0, y1, cuts))
+    else:
+        for y0, y1, specs in LAYOUT:
+            for i, (name, xs, want) in enumerate(specs):
+                xe = specs[i + 1][1] if i + 1 < len(specs) else fg.shape[1]
+                cuts, how = cut_group(fg, y0, y1, xs, xe, want)
+                print(f"{name:14s} {len(cuts)} frames  [{how}]")
+                groups.append((name, y0, y1, cuts))
 
     # Measure every frame first: one canvas for all of them, feet on a shared
     # line, so switching animation never shifts him vertically.
@@ -164,7 +204,7 @@ def main(sheet, outdir, contact=False):
     # that much — the same mistake that had him hovering over window ledges.
     ch = max(d - c for _, _, c, d in boxes.values())
     feet = ch
-    print(f"canvas {cw}x{ch} -> {cw*UPSCALE}x{ch*UPSCALE}, feet on the bottom edge")
+    print(f"canvas {cw}x{ch} -> {cw*upscale}x{ch*upscale}, feet on the bottom edge")
 
     os.makedirs(outdir, exist_ok=True)
     index, tiles = {}, []
@@ -174,16 +214,16 @@ def main(sheet, outdir, contact=False):
         ox, oy = (cw - (b - a)) // 2, feet - (d - c)
         canvas[oy:oy + (d - c), ox:ox + (b - a)] = rgba
         img = Image.fromarray(canvas, "RGBA")
-        if UPSCALE != 1:
-            img = img.resize((cw * UPSCALE, ch * UPSCALE), Image.NEAREST)
-        fname = f"img_y_hd_{name}{i}"
+        if upscale != 1:
+            img = img.resize((cw * upscale, ch * upscale), Image.NEAREST)
+        fname = f"img_y_{prefix}{name}{i}"
         img.save(os.path.join(outdir, fname + ".png"))
         index.setdefault(name, []).append(fname)
         tiles.append((fname, img))
 
     with open(os.path.join(outdir, "_index.json"), "w") as f:
-        json.dump({"canvas": [cw * UPSCALE, ch * UPSCALE],
-                   "feet": feet * UPSCALE, "groups": index}, f, indent=1)
+        json.dump({"canvas": [cw * upscale, ch * upscale],
+                   "feet": feet * upscale, "groups": index}, f, indent=1)
     print(f"wrote {len(tiles)} frames to {outdir}")
 
     if contact:
@@ -197,8 +237,30 @@ def main(sheet, outdir, contact=False):
         print("contact sheet written")
 
 
+def _opt(flag, default=None):
+    for a in sys.argv[1:]:
+        if a.startswith(flag + "="):
+            return a[len(flag) + 1:]
+    return default
+
+
 if __name__ == "__main__":
     args = [a for a in sys.argv[1:] if not a.startswith("-")]
     if len(args) < 2:
-        sys.exit("usage: slice_sheet.py <sheet.png> <outdir> [--contact]")
-    main(args[0], args[1], "--contact" in sys.argv)
+        sys.exit(
+            "usage: slice_sheet.py <sheet.png> <outdir> [--contact]\n"
+            "       [--row=name:y0:y1:frames] [--upscale=N] [--prefix=hd_]"
+        )
+    spec = _opt("--row")
+    row = None
+    if spec:
+        name, y0, y1, want = spec.split(":")
+        row = (name, int(y0), int(y1), int(want))
+    main(
+        args[0],
+        args[1],
+        "--contact" in sys.argv,
+        row,
+        int(_opt("--upscale", UPSCALE)),
+        _opt("--prefix", "hd_"),
+    )

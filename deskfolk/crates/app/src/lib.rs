@@ -297,7 +297,10 @@ const ANIM_HOLD_MS: i64 = 8_000;
 /// single list of every emotion is taller than the screen, and the ones that
 /// fell off the bottom would be unreachable.
 const ANIM_GROUPS: [(&str, &[&str]); 3] = [
-    ("Moving", &["hd_walk", "hd_run", "hd_turn", "hd_jump", "hd_stand"]),
+    (
+        "Moving",
+        &["walk", "walk_right", "hd_run", "hd_turn", "hd_jump", "hd_stand"],
+    ),
     (
         "Sitting",
         &["hd_sit_down", "hd_drink", "hd_take_coffee", "hd_laptop", "hd_phone", "hd_sleep"],

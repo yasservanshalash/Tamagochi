@@ -418,7 +418,16 @@ broken.
 `tools/slice_sheet.py <sheet.png> <outdir> [--contact]` cuts a generated sheet
 into frames. Three traps, all handled there and all worth knowing:
 
-- **Alpha.** The sheets have none, and the background is a near-black grey —
+- **Painted transparency.** A sheet can come back with a checkerboard *drawn
+  on* — it looks transparent, and the file is fully opaque. It is detected by
+  the share of near-neutral mid greys (116–208), a band this character never
+  occupies: his trousers are darker, his headphones lighter, everything else
+  is brown or tan. Unlike the flat backgrounds, it is keyed by colour and
+  *not* flood-filled — the squares are separated by anti-aliased seams a fill
+  cannot cross, and the gap between his legs is enclosed anyway, so a border
+  fill leaves a grey strip standing there.
+- **Alpha.** On the flat-background sheets there is none, and the background
+  is a near-black grey —
   and so are his jacket, trousers and outlines. A global colour key eats them.
   A border flood fill does not, but tolerance decides everything: at 34 it
   leaks through his outline and strips the jacket; at 16 he comes out whole.
@@ -441,8 +450,13 @@ deliberately.
 
 ### The walk cycle
 
-He walks, using the six-frame cycle from the August sheet. `Gait::of` looks for
-a clip named `walk`; without one he falls back to **hopping** — keeping
+He walks, using an eight-frame cycle drawn as a dedicated sheet at **289px
+tall — the size he is actually displayed at**, so nothing is upscaled. The
+earlier cycle came off a crowded page at 148px and had to be doubled; asking
+for one animation per sheet is what bought the resolution back.
+
+`Gait::of` looks for a clip named `walk`; without one he falls back to
+**hopping** — keeping
 whatever pose he is in and travelling in a half-sine arc, because a static
 sprite slid flat across the screen reads as a bug where an arc reads as intent.
 
