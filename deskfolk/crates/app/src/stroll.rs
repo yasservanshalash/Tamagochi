@@ -13,11 +13,18 @@
 //! ## On the walk cycle
 //!
 //! There is no walk animation in the package — every sprite is a seated or
-//! standing pose — so crossing the screen is done as a series of hops using the
-//! existing `jump` clip, which reads as deliberate movement rather than the
-//! sliding a static sprite would give. [`Gait`] picks whichever the package
-//! actually has, so adding a `walk` clip later changes the animation and
-//! nothing else.
+//! standing pose — so crossing the screen is done as a series of hops: he keeps
+//! whatever pose he is in and travels in an arc, which reads as deliberate
+//! movement where sliding a static sprite would not.
+//!
+//! Playing the package's `jump` clip for that was tried and is wrong. Its
+//! frames are the `img_y_big*` set, drawn at a visibly larger scale than the
+//! seated idle — sitting shows him in a beanbag, so the person occupies much
+//! less of the canvas — and he ballooned every time he moved. The arc alone
+//! does the job and keeps him one size.
+//!
+//! [`Gait`] picks whichever the package actually has, so adding a `walk` clip
+//! later switches him to walking and changes nothing else.
 
 use std::time::Duration;
 
@@ -27,7 +34,11 @@ pub enum Stroll {
     /// Sitting somewhere, with time to wait before wandering again.
     Resting { on: String, until_ms: i64 },
     /// Crossing to `target_x`, at `y`, on the ledge called `to`.
-    Walking { to: String, target_x: i32, y: i32, step_due_ms: i64 },
+    ///
+    /// `from_x` is where the current step began and `phase_ms` how far into it
+    /// he is, so movement is interpolated every frame rather than teleporting
+    /// once per step. That is what makes a hop an arc instead of a twitch.
+    Walking { to: String, target_x: i32, y: i32, from_x: i32, phase_ms: i64 },
 }
 
 /// What the package can animate movement with.
@@ -35,29 +46,54 @@ pub enum Stroll {
 pub enum Gait {
     /// A real walk cycle: he can move smoothly and continuously.
     Walk,
-    /// No walk cycle, so he hops — a static sprite slid across the screen
-    /// looks broken in a way a hop does not.
+    /// No walk cycle, so he hops, keeping whatever pose he is already in and
+    /// travelling in an arc.
+    ///
+    /// The obvious alternative was to play the package's `jump` clip, and it
+    /// was wrong: those frames are the `img_y_big*` set, drawn at a visibly
+    /// larger scale than the seated idle — he is in a beanbag when sitting,
+    /// so the person occupies far less of the canvas. Switching clips mid-move
+    /// made him balloon. The arc alone reads as a hop and keeps him one size.
     Hop,
 }
 
 impl Gait {
-    /// Which emotion to play for one unit of movement.
-    pub fn emotion(self) -> &'static str {
+    /// The looping clip to hold while moving, if the package has one.
+    ///
+    /// `None` means "keep the pose you are in" — correct for hopping, where
+    /// every candidate clip is the wrong scale.
+    pub fn emotion(self) -> Option<&'static str> {
         match self {
-            Gait::Walk => "walk",
-            Gait::Hop => "jump",
+            Gait::Walk => Some("walk"),
+            Gait::Hop => None,
         }
     }
 
-    /// How far he gets per step, and how long the step takes.
+    /// How far one step carries him, and how long it takes.
     ///
-    /// A hop covers more ground per step because it happens less often; the
-    /// two together come out at a similar crossing speed either way.
+    /// A hop covers more ground because it happens less often; both come out
+    /// at a similar crossing speed.
     pub fn step(self) -> (i32, i64) {
         match self {
-            Gait::Walk => (14, 90),
-            Gait::Hop => (46, 460),
+            Gait::Walk => (14, 80),
+            Gait::Hop => (46, 320),
         }
+    }
+
+    /// How high the arc peaks mid-step. Walking does not leave the ground.
+    pub fn lift(self) -> f32 {
+        match self {
+            Gait::Walk => 0.0,
+            Gait::Hop => 26.0,
+        }
+    }
+
+    /// Where he is within one step: `t` runs 0 to 1.
+    ///
+    /// A half sine, so he leaves and lands softly instead of moving in a
+    /// triangle — the difference between a hop and a bounce.
+    pub fn arc(self, t: f32) -> i32 {
+        (self.lift() * (t.clamp(0.0, 1.0) * std::f32::consts::PI).sin()).round() as i32
     }
 
     /// Pick from what the package actually provides.
@@ -78,8 +114,9 @@ const ARRIVED_WITHIN: i32 = 24;
 pub enum Step {
     /// Nothing to do.
     Stay,
-    /// Move to this position, playing a step of the gait.
-    Move { x: i32, y: i32, animate: bool },
+    /// Put him here. `y` already includes the arc, so the caller does not
+    /// need to know anything about gaits.
+    Move { x: i32, y: i32 },
     /// He got where he was going.
     Arrived { on: String },
 }
@@ -94,43 +131,50 @@ impl Stroll {
         matches!(self, Stroll::Walking { .. })
     }
 
-    /// Set off for a ledge.
-    pub fn walk_to(&mut self, to: String, target_x: i32, y: i32) {
-        *self = Stroll::Walking { to, target_x, y, step_due_ms: 0 };
+    /// Set off for a ledge, from wherever he is now.
+    pub fn walk_to(&mut self, to: String, from_x: i32, target_x: i32, y: i32) {
+        *self = Stroll::Walking { to, target_x, y, from_x, phase_ms: 0 };
     }
 
-    /// Advance by `dt`. `x` is where he is now.
+    /// Advance by `dt`.
     ///
     /// `allowed` is false whenever he should not be wandering — asleep,
     /// talking, listening, being dragged. He stops where he is rather than
     /// resetting, so an interrupted walk resumes instead of starting over.
-    pub fn tick(&mut self, dt: i64, x: i32, gait: Gait, allowed: bool) -> Step {
+    pub fn tick(&mut self, dt: i64, gait: Gait, allowed: bool) -> Step {
         match self {
             Stroll::Resting { until_ms, .. } => {
                 *until_ms -= dt;
                 Step::Stay
             }
-            Stroll::Walking { to, target_x, y, step_due_ms } => {
+            Stroll::Walking { to, target_x, y, from_x, phase_ms } => {
                 if !allowed {
                     return Step::Stay;
                 }
                 let (stride, per_step) = gait.step();
-                let remaining = *target_x - x;
-                if remaining.abs() <= ARRIVED_WITHIN {
+                if (*target_x - *from_x).abs() <= ARRIVED_WITHIN {
                     let on = std::mem::take(to);
                     let arrived = Step::Arrived { on: on.clone() };
                     *self = Stroll::Resting { on, until_ms: 0 };
                     return arrived;
                 }
-                *step_due_ms -= dt;
-                if *step_due_ms > 0 {
-                    return Step::Stay;
+                *phase_ms += dt;
+                let remaining = *target_x - *from_x;
+                // Never overshoot: a final stride longer than what is left
+                // would land him past the target and walking back.
+                let leg = stride.min(remaining.abs()) * remaining.signum();
+                let t = (*phase_ms as f32 / per_step as f32).clamp(0.0, 1.0);
+
+                if *phase_ms >= per_step {
+                    // Step done: he is on the ground at its far end.
+                    *from_x += leg;
+                    *phase_ms -= per_step;
+                    return Step::Move { x: *from_x, y: *y };
                 }
-                *step_due_ms = per_step;
-                // Never overshoot: a last stride longer than what is left
-                // would put him past the target and walking back.
-                let by = stride.min(remaining.abs()) * remaining.signum();
-                Step::Move { x: x + by, y: *y, animate: true }
+                Step::Move {
+                    x: *from_x + (leg as f32 * t).round() as i32,
+                    y: *y - gait.arc(t),
+                }
             }
         }
     }
@@ -190,34 +234,76 @@ mod tests {
     fn resting_counts_down_and_then_gets_restless() {
         let mut s = Stroll::new(100);
         assert!(!s.restless());
-        assert_eq!(s.tick(60, 0, Gait::Hop, true), Step::Stay);
+        assert_eq!(s.tick(60, Gait::Hop, true), Step::Stay);
         assert!(!s.restless());
-        s.tick(60, 0, Gait::Hop, true);
+        s.tick(60, Gait::Hop, true);
         assert!(s.restless(), "past its time: {s:?}");
     }
 
+    fn walking(target_x: i32, y: i32, from_x: i32) -> Stroll {
+        Stroll::Walking { to: "Editor".into(), target_x, y, from_x, phase_ms: 0 }
+    }
+
     #[test]
-    fn walking_steps_toward_the_target_on_the_gait_s_beat() {
-        let mut s = Stroll::Walking {
-            to: "Editor".into(),
-            target_x: 1000,
-            y: 300,
-            step_due_ms: 0,
-        };
-        let (stride, per_step) = Gait::Hop.step();
-        assert_eq!(
-            s.tick(16, 100, Gait::Hop, true),
-            Step::Move { x: 100 + stride, y: 300, animate: true }
-        );
-        // Not again until the step is due.
-        assert_eq!(s.tick(per_step / 2, 146, Gait::Hop, true), Step::Stay);
-        assert!(matches!(s.tick(per_step, 146, Gait::Hop, true), Step::Move { .. }));
+    fn he_moves_every_frame_not_once_per_step() {
+        // Teleporting a stride at a time is a twitch; this is what makes the
+        // hop an arc.
+        let mut s = walking(1000, 300, 100);
+        let mut seen = Vec::new();
+        for _ in 0..6 {
+            if let Step::Move { x, .. } = s.tick(16, Gait::Hop, true) {
+                seen.push(x);
+            }
+        }
+        assert_eq!(seen.len(), 6, "moved on every frame: {seen:?}");
+        assert!(seen.windows(2).all(|w| w[1] >= w[0]), "monotonic: {seen:?}");
+        assert!(seen.last().unwrap() > &100, "made progress: {seen:?}");
+    }
+
+    #[test]
+    fn a_hop_leaves_the_ground_and_lands_again() {
+        let mut s = walking(1000, 300, 100);
+        let (_, per_step) = Gait::Hop.step();
+        let mut heights = Vec::new();
+        for _ in 0..(per_step / 16) {
+            if let Step::Move { y, .. } = s.tick(16, Gait::Hop, true) {
+                heights.push(y);
+            }
+        }
+        let peak = *heights.iter().min().expect("moved");
+        assert!(peak < 300, "left the ground: {peak}");
+        assert!(300 - peak <= Gait::Hop.lift() as i32, "no higher than the arc");
+        // And comes back down by the end of the step.
+        let landed = s.tick(per_step, Gait::Hop, true);
+        assert!(matches!(landed, Step::Move { y, .. } if y == 300), "{landed:?}");
+    }
+
+    #[test]
+    fn walking_keeps_his_feet_on_the_ground() {
+        assert_eq!(Gait::Walk.arc(0.5), 0, "a walk cycle does not hop");
+        let mut s = walking(1000, 300, 100);
+        for _ in 0..8 {
+            if let Step::Move { y, .. } = s.tick(16, Gait::Walk, true) {
+                assert_eq!(y, 300);
+            }
+        }
+    }
+
+    #[test]
+    fn the_arc_peaks_in_the_middle_of_the_step() {
+        let g = Gait::Hop;
+        assert_eq!(g.arc(0.0), 0, "starts on the ground");
+        assert_eq!(g.arc(1.0), 0, "lands on the ground");
+        assert!(g.arc(0.5) > g.arc(0.2), "rising into the middle");
+        assert!(g.arc(0.5) > g.arc(0.8), "falling out of it");
     }
 
     #[test]
     fn he_walks_left_as_readily_as_right() {
-        let mut s = Stroll::Walking { to: "L".into(), target_x: 0, y: 10, step_due_ms: 0 };
-        let Step::Move { x, .. } = s.tick(16, 500, Gait::Hop, true) else {
+        let mut s = Stroll::Walking {
+            to: "L".into(), target_x: 0, y: 10, from_x: 500, phase_ms: 0,
+        };
+        let Step::Move { x, .. } = s.tick(16, Gait::Hop, true) else {
             panic!("should move");
         };
         assert!(x < 500, "moved toward the target, not away: {x}");
@@ -226,8 +312,9 @@ mod tests {
     #[test]
     fn the_last_step_never_overshoots() {
         // Otherwise he lands past the target and walks back, forever.
-        let mut s = Stroll::Walking { to: "E".into(), target_x: 130, y: 10, step_due_ms: 0 };
-        let Step::Move { x, .. } = s.tick(16, 100, Gait::Hop, true) else {
+        let mut s = walking(130, 10, 100);
+        let (_, per_step) = Gait::Hop.step();
+        let Step::Move { x, .. } = s.tick(per_step, Gait::Hop, true) else {
             panic!("should move");
         };
         assert_eq!(x, 130, "stops exactly on it rather than sailing past");
@@ -235,8 +322,8 @@ mod tests {
 
     #[test]
     fn arriving_settles_him_and_reports_where() {
-        let mut s = Stroll::Walking { to: "Editor".into(), target_x: 100, y: 10, step_due_ms: 0 };
-        assert_eq!(s.tick(16, 90, Gait::Hop, true), Step::Arrived { on: "Editor".into() });
+        let mut s = walking(100, 10, 90);
+        assert_eq!(s.tick(16, Gait::Hop, true), Step::Arrived { on: "Editor".into() });
         assert!(!s.is_walking());
         assert!(s.restless(), "ready to consider the next place");
     }
@@ -244,21 +331,26 @@ mod tests {
     #[test]
     fn an_interrupted_walk_holds_its_place_rather_than_restarting() {
         // Being spoken to mid-walk should not cost him the journey.
-        let mut s = Stroll::Walking { to: "E".into(), target_x: 900, y: 10, step_due_ms: 0 };
-        assert_eq!(s.tick(16, 100, Gait::Hop, false), Step::Stay);
+        let mut s = Stroll::Walking {
+            to: "E".into(), target_x: 900, y: 10, from_x: 100, phase_ms: 0,
+        };
+        assert_eq!(s.tick(16, Gait::Hop, false), Step::Stay);
         assert!(
             matches!(&s, Stroll::Walking { to, target_x, .. } if to == "E" && *target_x == 900),
             "still going there afterwards: {s:?}"
         );
-        assert!(matches!(s.tick(16, 100, Gait::Hop, true), Step::Move { .. }));
+        assert!(matches!(s.tick(16, Gait::Hop, true), Step::Move { .. }));
     }
 
     #[test]
-    fn a_walk_cycle_is_used_when_the_package_has_one() {
+    fn hopping_never_swaps_to_a_differently_scaled_clip() {
+        // The regression: hopping played the package's `jump` clip, whose
+        // frames are the `img_y_big*` set — drawn much larger than the seated
+        // idle, so he ballooned every time he moved.
+        assert_eq!(Gait::Hop.emotion(), None, "keeps whatever pose he is in");
+        assert_eq!(Gait::Walk.emotion(), Some("walk"));
         assert_eq!(Gait::of(true), Gait::Walk);
         assert_eq!(Gait::of(false), Gait::Hop);
-        assert_eq!(Gait::Walk.emotion(), "walk");
-        assert_eq!(Gait::Hop.emotion(), "jump");
         // Hops are rarer and longer, so both gaits cross at a similar pace.
         let (walk_d, walk_t) = Gait::Walk.step();
         let (hop_d, hop_t) = Gait::Hop.step();

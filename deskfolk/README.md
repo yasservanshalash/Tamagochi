@@ -402,8 +402,14 @@ interrupted walk holds its place and resumes rather than restarting.
 ### The walk cycle he does not have yet
 
 There is no walk animation in the package — every sprite is seated or
-standing — so he **hops**, using the existing `jump` clip. A static sprite slid
-across the screen reads as a bug; a hop reads as intent.
+standing — so he **hops**: he keeps whatever pose he is in and travels in a
+half-sine arc, interpolated every frame. A static sprite slid flat across the
+screen reads as a bug; an arc reads as intent.
+
+Playing the package's `jump` clip for this was tried and is wrong. Its frames
+are the `img_y_big*` set, drawn at a visibly larger scale than the seated idle
+— sitting shows him in a beanbag, so the *person* fills much less of the
+canvas — and he ballooned every time he moved.
 
 `Gait::of` picks whichever the package actually provides, so adding a `walk`
 clip switches him to walking and changes nothing else. To add one:
@@ -414,6 +420,8 @@ clip switches him to walking and changes nothing else. To add one:
 - Same 412×412 canvas as every other sprite, and — the one that matters —
   **feet on the same baseline** (`anchor_y` 386), or he will jolt vertically
   each time he changes gait.
+- Drawn at the **same apparent scale as the seated idle**, not the `img_y_big*`
+  scale. That is the difference between him walking and him growing.
 - Hard alpha edges, no anti-aliased halo. See `tools/check_sprites.py`.
 
 Then in `character.json`:

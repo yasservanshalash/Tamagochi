@@ -640,13 +640,18 @@ fn wander_tick(
     };
 
     let (x, _) = companion.position();
-    let (w, h) = companion.size();
-    match walk.tick(dt, x, gait, free) {
+    let (w, _) = companion.size();
+    match walk.tick(dt, gait, free) {
         stroll::Step::Stay => {}
-        stroll::Step::Move { x, y, animate } => {
+        stroll::Step::Move { x, y } => {
             companion.move_to(x, y);
-            if animate {
-                let _ = rt.lock().engine.play_emotion(gait.emotion(), 0, 0);
+            // Hold the walk cycle while he is moving, re-asserted rather than
+            // set once: a clip with a hold would otherwise lapse back to idle
+            // part-way across the screen. Hopping has no clip to hold.
+            if let Some(e) = gait.emotion() {
+                if roll % 30 == 0 {
+                    let _ = rt.lock().engine.play_emotion(e, 0, 0);
+                }
             }
         }
         stroll::Step::Arrived { on } => {
@@ -677,11 +682,18 @@ fn wander_tick(
     };
     match stroll::pick(&ledges, x + w / 2, &resting_on, roll) {
         Some(l) => {
-            // His feet are the bottom of the stage, so sitting *on* an edge
-            // means his window bottom lands there, not his top.
+            // Land his *feet* on the edge. The stage keeps empty canvas below
+            // the anchor, so putting the window's bottom there left him
+            // hovering above the ledge by that margin.
             let target_x = l.clamp_x(x + w / 2, w / 2) - w / 2;
-            tracing::debug!("wander: setting off for {:?}", l.title);
-            walk.walk_to(l.title.clone(), target_x, l.top - h);
+            let target_y = l.top - companion.feet_offset();
+            tracing::debug!(
+                "wander: setting off for {:?} — ledge top {}, feet land there with \
+                 his window at y {target_y}",
+                l.title,
+                l.top,
+            );
+            walk.walk_to(l.title.clone(), x, target_x, target_y);
         }
         // Nowhere worth going: wait before asking again rather than
         // re-scanning the whole desktop every frame.

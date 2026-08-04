@@ -67,6 +67,14 @@ pub(crate) struct Shared {
     /// The monitor's DPI, so the app can map screen pixels back into stage
     /// units without guessing at the display scaling.
     pub dpi: AtomicU32,
+    /// Screen pixels per stage unit, times 1000 — the value actually being
+    /// drawn with, after DPI *and* pixel snapping.
+    ///
+    /// Published because it cannot be recomputed from the outside: snapping
+    /// rounds it to a whole number, so at scale 1.3 the window is drawn at 1.0
+    /// and anything deriving a size from 1.3 is wrong by a third. It follows
+    /// the monitor, so it changes when he is dragged to another display.
+    pub unit_milli: AtomicU32,
     pub host: Arc<dyn Host>,
 }
 
@@ -103,6 +111,9 @@ impl WindowState {
         self.shared.dpi.store(dpi, Ordering::Relaxed);
         let factor = dpi as f64 / 96.0;
         self.unit = snap_unit(self.scale * factor, self.pixel_snap);
+        self.shared
+            .unit_milli
+            .store((self.unit * 1000.0).round() as u32, Ordering::Relaxed);
         let w = (self.stage.width as f64 * self.unit).round() as i32;
         let h = (self.stage.height as f64 * self.unit).round() as i32;
         if self.size != (w, h) || self.surface.is_none() {
@@ -216,6 +227,7 @@ pub(crate) fn spawn(
         x: AtomicI32::new(0),
         y: AtomicI32::new(0),
         dpi: AtomicU32::new(96),
+        unit_milli: AtomicU32::new(1000),
         host,
     });
     let thread_shared = shared.clone();

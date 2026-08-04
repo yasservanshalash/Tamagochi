@@ -125,7 +125,7 @@ pub trait Host: Send + Sync + 'static {
 pub struct Companion {
     hwnd: isize,
     shared: Arc<window::Shared>,
-    size: (i32, i32),
+    stage: Stage,
     on_desktop: bool,
 }
 
@@ -148,16 +148,12 @@ impl Companion {
         );
 
         let stage = config.stage;
-        let scale = config.scale;
         let on_desktop = config.on_desktop;
         let spawned = window::spawn(config, sprites, host)?;
         Ok(Self {
             hwnd: spawned.hwnd,
             shared: spawned.shared,
-            size: (
-                (stage.width as f64 * scale).round() as i32,
-                (stage.height as f64 * scale).round() as i32,
-            ),
+            stage,
             on_desktop,
         })
     }
@@ -175,9 +171,32 @@ impl Companion {
         )
     }
 
-    /// Logical size, before display scaling.
+    /// Screen pixels per stage unit, as actually drawn.
+    ///
+    /// Read from the window rather than derived from the configured scale:
+    /// pixel snapping rounds it to a whole number, so a companion configured
+    /// at 1.3 is drawn at 1.0 and every size computed from 1.3 is a third too
+    /// large.
+    fn unit(&self) -> f64 {
+        self.shared.unit_milli.load(Ordering::Relaxed) as f64 / 1000.0
+    }
+
+    /// His size on screen, in real pixels.
     pub fn size(&self) -> (i32, i32) {
-        self.size
+        let unit = self.unit();
+        (
+            (self.stage.width as f64 * unit).round() as i32,
+            (self.stage.height as f64 * unit).round() as i32,
+        )
+    }
+
+    /// How far his feet are below the top of the window.
+    ///
+    /// Not the window's height: the stage keeps empty canvas below the anchor,
+    /// so putting the *bottom* of the window on a ledge leaves him hovering
+    /// above it by that margin.
+    pub fn feet_offset(&self) -> i32 {
+        (self.stage.anchor_y as f64 * self.unit()).round() as i32
     }
 
     /// Put him somewhere, in screen pixels — the same path a drag takes, so a
