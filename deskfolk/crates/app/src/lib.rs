@@ -745,6 +745,13 @@ fn wander_tick(
                 }
             }
         }
+        // Stopped to look at something part-way. He keeps his place; only the
+        // walk cycle drops, so it reads as pausing rather than as arriving.
+        stroll::Step::Dawdle { .. } => {
+            if gait.emotion(stroll::Facing::Left).is_some() && roll % 20 == 0 {
+                let _ = rt.lock().engine.play_emotion("stand", 0, 2_000);
+            }
+        }
         stroll::Step::Arrived { on } => {
             tracing::debug!("wander: settled on {on:?}");
             journal::did(format!("moved to stand on {on:?}"));
@@ -788,7 +795,7 @@ fn wander_tick(
                 (target_x - x).abs(),
                 l.top,
             );
-            walk.walk_to(l.title.clone(), x, target_x, target_y);
+            walk.walk_to(l.title.clone(), x, target_x, target_y, roll);
         }
         // Nowhere worth going: wait before asking again rather than
         // re-scanning the whole desktop every frame.

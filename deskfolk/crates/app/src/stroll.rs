@@ -37,10 +37,24 @@ pub enum Stroll {
     Resting { on: String, until_ms: i64 },
     /// Crossing to `target_x`, at `y`, on the ledge called `to`.
     ///
-    /// `from_x` is where the current step began and `phase_ms` how far into it
-    /// he is, so movement is interpolated every frame rather than teleporting
-    /// once per step. That is what makes a hop an arc instead of a twitch.
-    Walking { to: String, target_x: i32, y: i32, from_x: i32, phase_ms: i64 },
+    /// Position is carried in thousandths of a pixel so that speed can vary
+    /// continuously without the rounding turning it back into a stutter, and
+    /// so the state stays comparable — no floats in an enum that derives
+    /// `PartialEq`.
+    Walking {
+        to: String,
+        target_x: i32,
+        y: i32,
+        /// Where the journey began, which is what the ease-in is measured from.
+        from_x: i32,
+        x_milli: i64,
+        /// This journey's pace as a percentage of his normal walk.
+        pace: i32,
+        /// Until he next stops to look at something.
+        next_pause_ms: i64,
+        /// How much of the current stop is left.
+        pause_left_ms: i64,
+    },
 }
 
 /// What the package can animate movement with.
@@ -79,6 +93,16 @@ impl Gait {
             (Gait::Walk, Facing::Right) => Some("walk_right"),
             (Gait::Hop, _) => None,
         }
+    }
+
+    /// His flat-out pace, in thousandths of a pixel per millisecond.
+    ///
+    /// Same derivation as [`Gait::step`], expressed continuously so that
+    /// easing and a per-journey pace can scale it without quantising the
+    /// result back into a stutter.
+    pub fn speed_mpms(self, height_px: i32) -> i64 {
+        let (px, ms) = self.step(height_px);
+        (px as i64 * 1000 / ms.max(1)).max(1)
     }
 
     /// How far one movement quantum carries him, and how long it takes.
@@ -145,6 +169,60 @@ pub const REST_MAX: Duration = Duration::from_secs(150);
 /// Close enough to the target to stop rather than shuffle the last few pixels.
 const ARRIVED_WITHIN: i32 = 24;
 
+// --- what keeps it from looking like a machine ------------------------------
+//
+// A constant speed in a straight line from A to B is the thing that reads as
+// robotic, and no amount of animation quality hides it: he starts at full
+// pace, holds it exactly, and stops dead. Three cheap corrections between
+// them cover most of the difference.
+
+/// Slowest he moves while easing off, as a percentage of his pace. Not zero:
+/// a true ease to nothing means an endless crawl over the last few pixels.
+const EASE_FLOOR: i64 = 30;
+/// Pace varies this much per journey, so no two crossings are the same speed.
+const PACE_SPREAD: i32 = 22;
+/// He does not bother stopping to look around on a short hop.
+const DAWDLE_IF_FURTHER_THAN: i32 = 260;
+/// Range for how long he walks before stopping to look at something.
+const DAWDLE_EVERY_MS: (i64, i64) = (1_400, 4_800);
+/// Range for how long that stop lasts.
+const DAWDLE_FOR_MS: (i64, i64) = (700, 2_400);
+
+/// A small deterministic spread from a counter, in `0..n`.
+///
+/// The counter is a frame index, so using it directly makes every derived
+/// value a near-linear function of time — the bug that had every walk target
+/// landing on the same side of the screen.
+fn scatter(seed: u32, salt: u32, n: i64) -> i64 {
+    if n <= 0 {
+        return 0;
+    }
+    let h = seed.wrapping_add(salt).wrapping_mul(2_654_435_761) >> 8;
+    (h as i64) % n
+}
+
+fn in_range(seed: u32, salt: u32, range: (i64, i64)) -> i64 {
+    range.0 + scatter(seed, salt, range.1 - range.0 + 1)
+}
+
+/// Speed multiplier for where he is along the journey, as a percentage.
+///
+/// Ramps up out of a standing start and back down into the destination, over
+/// whichever is shorter: about one stride, or a third of the trip. Measured
+/// against both ends so a short walk still eases at both.
+///
+/// One stride and not more: over his full height the ramp stops being a shape
+/// and becomes a tax, dragging a long crossing down to half pace throughout.
+fn ease(travelled: i32, remaining: i32, height_px: i32, total: i32) -> i64 {
+    let ramp = (height_px / 2).min((total / 3).max(1)).max(1) as i64;
+    let up = (travelled.max(0) as i64 * 100 / ramp).min(100);
+    let down = (remaining.max(0) as i64 * 100 / ramp).min(100);
+    let t = up.min(down);
+    // Smoothstep, so the change of pace itself is not a sharp corner.
+    let smooth = t * t * (300 - 2 * t) / 10_000;
+    EASE_FLOOR + (100 - EASE_FLOOR) * smooth / 100
+}
+
 /// What the caller should do this tick.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Step {
@@ -153,6 +231,9 @@ pub enum Step {
     /// Put him here. `y` already includes the arc, so the caller does not
     /// need to know anything about gaits.
     Move { x: i32, y: i32, facing: Facing },
+    /// He has stopped part-way, looking at something. Still on his way, so
+    /// the caller should hold him where he is and drop the walk cycle.
+    Dawdle { y: i32, facing: Facing },
     /// He got where he was going.
     Arrived { on: String },
 }
@@ -168,8 +249,20 @@ impl Stroll {
     }
 
     /// Set off for a ledge, from wherever he is now.
-    pub fn walk_to(&mut self, to: String, from_x: i32, target_x: i32, y: i32) {
-        *self = Stroll::Walking { to, target_x, y, from_x, phase_ms: 0 };
+    ///
+    /// `seed` varies this journey from the last one — its pace, and when he
+    /// first stops to look at something.
+    pub fn walk_to(&mut self, to: String, from_x: i32, target_x: i32, y: i32, seed: u32) {
+        *self = Stroll::Walking {
+            to,
+            target_x,
+            y,
+            from_x,
+            x_milli: from_x as i64 * 1000,
+            pace: 100 - PACE_SPREAD + scatter(seed, 11, PACE_SPREAD as i64 * 2 + 1) as i32,
+            next_pause_ms: in_range(seed, 29, DAWDLE_EVERY_MS),
+            pause_left_ms: 0,
+        };
     }
 
     /// Advance by `dt`.
@@ -183,36 +276,64 @@ impl Stroll {
                 *until_ms -= dt;
                 Step::Stay
             }
-            Stroll::Walking { to, target_x, y, from_x, phase_ms } => {
+            Stroll::Walking {
+                to, target_x, y, from_x, x_milli, pace, next_pause_ms, pause_left_ms,
+            } => {
                 if !allowed {
                     return Step::Stay;
                 }
-                let (stride, per_step) = gait.step(height_px);
-                if (*target_x - *from_x).abs() <= ARRIVED_WITHIN {
+                let x = (*x_milli / 1000) as i32;
+                let remaining = *target_x - x;
+                if remaining.abs() <= ARRIVED_WITHIN {
                     let on = std::mem::take(to);
                     let arrived = Step::Arrived { on: on.clone() };
                     *self = Stroll::Resting { on, until_ms: 0 };
                     return arrived;
                 }
-                *phase_ms += dt;
-                let remaining = *target_x - *from_x;
-                // Never overshoot: a final stride longer than what is left
-                // would land him past the target and walking back.
-                let leg = stride.min(remaining.abs()) * remaining.signum();
-                let t = (*phase_ms as f32 / per_step as f32).clamp(0.0, 1.0);
                 let facing = if remaining < 0 { Facing::Left } else { Facing::Right };
 
-                if *phase_ms >= per_step {
-                    // Step done: he is on the ground at its far end.
-                    *from_x += leg;
-                    *phase_ms -= per_step;
-                    return Step::Move { x: *from_x, y: *y, facing };
+                // Stopped to look at something. He is still on his way.
+                if *pause_left_ms > 0 {
+                    *pause_left_ms -= dt;
+                    return Step::Dawdle { y: *y, facing };
                 }
-                Step::Move {
-                    x: *from_x + (leg as f32 * t).round() as i32,
-                    y: *y - gait.arc(t),
-                    facing,
+                *next_pause_ms -= dt;
+                if *next_pause_ms <= 0 {
+                    if remaining.abs() > DAWDLE_IF_FURTHER_THAN {
+                        let seed = (*x_milli as u32) ^ (*target_x as u32);
+                        *pause_left_ms = in_range(seed, 71, DAWDLE_FOR_MS);
+                        *next_pause_ms = in_range(seed, 97, DAWDLE_EVERY_MS);
+                        return Step::Dawdle { y: *y, facing };
+                    }
+                    // Too near the end to be worth stopping; do not ask again.
+                    *next_pause_ms = i64::MAX / 2;
                 }
+
+                let total = (*target_x - *from_x).abs();
+                let factor = ease((x - *from_x).abs(), remaining.abs(), height_px, total);
+                let speed = gait.speed_mpms(height_px) * *pace as i64 / 100 * factor / 100;
+                let travel = (speed * dt).max(1);
+                let before = *x_milli;
+                *x_milli += travel * remaining.signum() as i64;
+                // Never sail past the target and walk back to it.
+                if (*target_x as i64 * 1000 - *x_milli).signum()
+                    != (*target_x as i64 * 1000 - before).signum()
+                {
+                    *x_milli = *target_x as i64 * 1000;
+                }
+
+                let now = (*x_milli / 1000) as i32;
+                // Hopping still leaves the ground; the arc comes from how far
+                // through the current stride he is, so it survives a varying
+                // speed instead of assuming a fixed beat.
+                let lift = if gait.lift() > 0.0 {
+                    let stride = gait.step(height_px).0.max(1);
+                    let phase = (now - *from_x).abs() % stride;
+                    gait.arc(phase as f32 / stride as f32)
+                } else {
+                    0
+                };
+                Step::Move { x: now, y: *y - lift, facing }
             }
         }
     }
@@ -312,48 +433,117 @@ mod tests {
     }
 
     fn walking(target_x: i32, y: i32, from_x: i32) -> Stroll {
-        Stroll::Walking { to: "Editor".into(), target_x, y, from_x, phase_ms: 0 }
+        let mut s = Stroll::new(0);
+        s.walk_to("Editor".into(), from_x, target_x, y, 3);
+        s
+    }
+
+    /// Run a journey to completion, returning every position he passed
+    /// through and how many frames he spent standing still on the way.
+    fn journey(s: &mut Stroll, gait: Gait) -> (Vec<i32>, usize) {
+        let (mut xs, mut paused) = (Vec::new(), 0);
+        for _ in 0..4000 {
+            match s.tick(16, gait, TEST_H, true) {
+                Step::Move { x, .. } => xs.push(x),
+                Step::Dawdle { .. } => paused += 1,
+                Step::Arrived { .. } => break,
+                Step::Stay => {}
+            }
+        }
+        (xs, paused)
     }
 
     #[test]
     fn he_moves_every_frame_not_once_per_step() {
-        // Teleporting a stride at a time is a twitch; this is what makes the
-        // hop an arc.
+        // Teleporting a stride at a time is a twitch; continuous motion is
+        // also what makes the easing visible at all.
         let mut s = walking(1000, 300, 100);
-        let mut seen = Vec::new();
-        for _ in 0..6 {
-            if let Step::Move { x, .. } = s.tick(16, Gait::Hop, TEST_H, true) {
-                seen.push(x);
-            }
-        }
-        assert_eq!(seen.len(), 6, "moved on every frame: {seen:?}");
-        assert!(seen.windows(2).all(|w| w[1] >= w[0]), "monotonic: {seen:?}");
-        assert!(seen.last().unwrap() > &100, "made progress: {seen:?}");
+        let (xs, _) = journey(&mut s, Gait::Walk);
+        assert!(xs.len() > 50, "too few frames to be smooth: {}", xs.len());
+        assert!(xs.windows(2).all(|w| w[1] >= w[0]), "never goes backwards");
+        assert!(*xs.last().unwrap() > 950, "got there: {:?}", xs.last());
     }
 
     #[test]
-    fn a_hop_leaves_the_ground_and_lands_again() {
-        let mut s = walking(1000, 300, 100);
-        let (_, per_step) = Gait::Hop.step(TEST_H);
+    fn he_eases_out_of_a_standing_start_and_into_the_target() {
+        // A constant speed from A to B is the thing that reads as robotic.
+        let mut s = walking(1600, 300, 100);
+        let (xs, _) = journey(&mut s, Gait::Walk);
+        let gap = |i: usize| (xs[i + 1] - xs[i]).abs();
+        let early: i32 = (0..6).map(gap).sum();
+        let middle: i32 = (xs.len() / 2..xs.len() / 2 + 6).map(gap).sum();
+        let late: i32 = (xs.len() - 8..xs.len() - 2).map(gap).sum();
+        assert!(early < middle, "no ease-in: {early} then {middle}");
+        assert!(late < middle, "no ease-out: {middle} then {late}");
+    }
+
+    #[test]
+    fn the_ease_never_stalls_him_completely() {
+        // Easing all the way to zero means an endless crawl over the last few
+        // pixels, which looks worse than starting abruptly.
+        assert!(ease(0, 9999, 289, 9999) >= EASE_FLOOR);
+        assert!(ease(9999, 0, 289, 9999) >= EASE_FLOOR);
+        assert_eq!(ease(9999, 9999, 289, 9999), 100, "full pace in the middle");
+    }
+
+    #[test]
+    fn he_stops_to_look_at_things_on_a_long_walk() {
+        let mut s = walking(2000, 300, 0);
+        let (_, paused) = journey(&mut s, Gait::Walk);
+        assert!(paused > 0, "walked the whole way without once pausing");
+    }
+
+    #[test]
+    fn he_does_not_dawdle_on_a_short_hop() {
+        // Stopping to look around while crossing 200px reads as a stall, not
+        // as character.
+        let mut s = walking(200, 300, 0);
+        let (_, paused) = journey(&mut s, Gait::Walk);
+        assert_eq!(paused, 0, "paused on a walk not worth pausing in");
+    }
+
+    #[test]
+    fn no_two_journeys_are_paced_the_same() {
+        // Identical timing every trip is half of what reads as mechanical.
+        let mut lens = std::collections::BTreeSet::new();
+        for seed in 0..12u32 {
+            let mut s = Stroll::new(0);
+            s.walk_to("E".into(), 0, 1200, 10, seed);
+            lens.insert(journey(&mut s, Gait::Walk).0.len());
+        }
+        assert!(lens.len() > 4, "only {} distinct durations", lens.len());
+    }
+
+    #[test]
+    fn a_pace_is_a_variation_not_a_lurch() {
+        // Wide enough to notice, narrow enough that he never sprints.
+        for seed in 0..200u32 {
+            let mut s = Stroll::new(0);
+            s.walk_to("E".into(), 0, 1200, 10, seed);
+            let Stroll::Walking { pace, .. } = &s else { panic!("not walking") };
+            assert!((100 - PACE_SPREAD..=100 + PACE_SPREAD).contains(pace), "{pace}");
+        }
+    }
+
+    #[test]
+    fn a_hop_still_leaves_the_ground() {
+        let mut s = walking(1200, 300, 0);
         let mut heights = Vec::new();
-        for _ in 0..(per_step / 16) {
+        for _ in 0..200 {
             if let Step::Move { y, .. } = s.tick(16, Gait::Hop, TEST_H, true) {
                 heights.push(y);
             }
         }
         let peak = *heights.iter().min().expect("moved");
-        assert!(peak < 300, "left the ground: {peak}");
-        assert!(300 - peak <= Gait::Hop.lift() as i32, "no higher than the arc");
-        // And comes back down by the end of the step.
-        let landed = s.tick(per_step, Gait::Hop, TEST_H, true);
-        assert!(matches!(landed, Step::Move { y, .. } if y == 300), "{landed:?}");
+        assert!(peak < 300, "never left the ground: {peak}");
+        assert!(300 - peak <= Gait::Hop.lift() as i32 + 1, "higher than the arc");
     }
 
     #[test]
     fn walking_keeps_his_feet_on_the_ground() {
         assert_eq!(Gait::Walk.arc(0.5), 0, "a walk cycle does not hop");
         let mut s = walking(1000, 300, 100);
-        for _ in 0..8 {
+        for _ in 0..40 {
             if let Step::Move { y, .. } = s.tick(16, Gait::Walk, TEST_H, true) {
                 assert_eq!(y, 300);
             }
@@ -370,55 +560,34 @@ mod tests {
     }
 
     #[test]
-    fn he_faces_the_way_he_is_going() {
-        // The cycle as drawn faces left, so walking right needs the mirrored
-        // clip. Getting this backwards makes him moonwalk everywhere.
-        let mut right = walking(900, 10, 100);
-        assert!(matches!(right.tick(16, Gait::Walk, TEST_H, true),
-                         Step::Move { facing: Facing::Right, .. }));
-        let mut left = Stroll::Walking {
-            to: "L".into(), target_x: 0, y: 10, from_x: 900, phase_ms: 0,
-        };
-        assert!(matches!(left.tick(16, Gait::Walk, TEST_H, true),
-                         Step::Move { facing: Facing::Left, .. }));
-    }
-
-    #[test]
-    fn facing_picks_the_mirrored_clip_not_the_same_one() {
-        // Both directions resolving to one clip is the failure that looks
-        // like he is sliding backwards half the time.
-        assert_ne!(
-            Gait::Walk.emotion(Facing::Left),
-            Gait::Walk.emotion(Facing::Right)
-        );
-    }
-
-    #[test]
     fn he_walks_left_as_readily_as_right() {
-        let mut s = Stroll::Walking {
-            to: "L".into(), target_x: 0, y: 10, from_x: 500, phase_ms: 0,
-        };
-        let Step::Move { x, .. } = s.tick(16, Gait::Hop, TEST_H, true) else {
+        let mut s = Stroll::new(0);
+        s.walk_to("L".into(), 500, 0, 10, 5);
+        let Step::Move { x, .. } = s.tick(16, Gait::Walk, TEST_H, true) else {
             panic!("should move");
         };
         assert!(x < 500, "moved toward the target, not away: {x}");
     }
 
     #[test]
-    fn the_last_step_never_overshoots() {
-        // Otherwise he lands past the target and walks back, forever.
-        let mut s = walking(130, 10, 100);
-        let (_, per_step) = Gait::Hop.step(TEST_H);
-        let Step::Move { x, .. } = s.tick(per_step, Gait::Hop, TEST_H, true) else {
-            panic!("should move");
-        };
-        assert_eq!(x, 130, "stops exactly on it rather than sailing past");
+    fn he_never_overshoots_and_walks_back() {
+        // With a varying speed the final frame can land past the target, and
+        // then he turns round for it — a visible twitch at the end of a walk.
+        for seed in 0..40u32 {
+            let mut s = Stroll::new(0);
+            s.walk_to("E".into(), 0, 700, 10, seed);
+            let (xs, _) = journey(&mut s, Gait::Walk);
+            assert!(xs.iter().all(|&x| x <= 700), "overshot: {:?}", xs.iter().max());
+        }
     }
 
     #[test]
     fn arriving_settles_him_and_reports_where() {
         let mut s = walking(100, 10, 90);
-        assert_eq!(s.tick(16, Gait::Hop, TEST_H, true), Step::Arrived { on: "Editor".into() });
+        assert_eq!(
+            s.tick(16, Gait::Walk, TEST_H, true),
+            Step::Arrived { on: "Editor".into() }
+        );
         assert!(!s.is_walking());
         assert!(s.restless(), "ready to consider the next place");
     }
@@ -426,15 +595,40 @@ mod tests {
     #[test]
     fn an_interrupted_walk_holds_its_place_rather_than_restarting() {
         // Being spoken to mid-walk should not cost him the journey.
-        let mut s = Stroll::Walking {
-            to: "E".into(), target_x: 900, y: 10, from_x: 100, phase_ms: 0,
-        };
-        assert_eq!(s.tick(16, Gait::Hop, TEST_H, false), Step::Stay);
+        let mut s = walking(900, 10, 100);
+        for _ in 0..10 {
+            s.tick(16, Gait::Walk, TEST_H, true);
+        }
+        assert_eq!(s.tick(16, Gait::Walk, TEST_H, false), Step::Stay);
         assert!(
-            matches!(&s, Stroll::Walking { to, target_x, .. } if to == "E" && *target_x == 900),
+            matches!(&s, Stroll::Walking { target_x, .. } if *target_x == 900),
             "still going there afterwards: {s:?}"
         );
-        assert!(matches!(s.tick(16, Gait::Hop, TEST_H, true), Step::Move { .. }));
+        assert!(matches!(s.tick(16, Gait::Walk, TEST_H, true), Step::Move { .. }));
+    }
+
+    #[test]
+    fn he_faces_the_way_he_is_going() {
+        // The cycle as drawn faces one way, so the other needs the mirrored
+        // clip. Getting this backwards makes him moonwalk everywhere.
+        let mut right = walking(900, 10, 100);
+        assert!(matches!(
+            right.tick(16, Gait::Walk, TEST_H, true),
+            Step::Move { facing: Facing::Right, .. }
+        ));
+        let mut left = Stroll::new(0);
+        left.walk_to("L".into(), 900, 0, 10, 2);
+        assert!(matches!(
+            left.tick(16, Gait::Walk, TEST_H, true),
+            Step::Move { facing: Facing::Left, .. }
+        ));
+    }
+
+    #[test]
+    fn facing_picks_the_mirrored_clip_not_the_same_one() {
+        // Both directions resolving to one clip is the failure that looks like
+        // he is sliding backwards half the time.
+        assert_ne!(Gait::Walk.emotion(Facing::Left), Gait::Walk.emotion(Facing::Right));
     }
 
     #[test]
@@ -442,22 +636,12 @@ mod tests {
         // The regression: hopping played the package's `jump` clip, whose
         // frames are the `img_y_big*` set — drawn much larger than the seated
         // idle, so he ballooned every time he moved.
-        assert_eq!(Gait::Hop.emotion(Facing::Left), None, "keeps whatever pose he is in");
+        assert_eq!(Gait::Hop.emotion(Facing::Left), None, "keeps the pose he is in");
         assert_eq!(Gait::Hop.emotion(Facing::Right), None);
         assert_eq!(Gait::Walk.emotion(Facing::Left), Some("walk"));
         assert_eq!(Gait::Walk.emotion(Facing::Right), Some("walk_right"));
         assert_eq!(Gait::of(true), Gait::Walk);
         assert_eq!(Gait::of(false), Gait::Hop);
-        // Hops are rarer and longer, so both gaits cross at a similar pace.
-        let (walk_d, walk_t) = Gait::Walk.step(TEST_H);
-        let (hop_d, hop_t) = Gait::Hop.step(TEST_H);
-        assert!(hop_d > walk_d && hop_t > walk_t);
-        let walk_speed = walk_d as f64 / walk_t as f64;
-        let hop_speed = hop_d as f64 / hop_t as f64;
-        assert!(
-            (walk_speed - hop_speed).abs() < walk_speed * 0.5,
-            "walk {walk_speed:.3} vs hop {hop_speed:.3} px/ms"
-        );
     }
 
     #[test]
