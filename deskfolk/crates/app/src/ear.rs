@@ -34,6 +34,9 @@ use crate::audio::{AudioSettings, Recorder, SOURCE_RATE};
 /// to hear you, so it is as short as it can be while still holding enough
 /// samples to be worth a percentile.
 const CALIBRATE_MS: u64 = 200;
+/// A backstop on waiting for the device to start delivering, so a mic that
+/// never produces a sample cannot hold a turn open forever.
+const CALIBRATE_CAP_MS: u64 = 1_500;
 /// Speech must clear the noise floor by at least this much, on a 0..=100 peak
 /// scale — and by a quarter of the floor again in a room that is already loud,
 /// since noise that loud fluctuates by more than a fixed margin.
@@ -49,6 +52,11 @@ const SILENCE_MS: u64 = 1_000;
 const NO_SPEECH_MS: u64 = 4_000;
 /// Hard ceiling on one turn, so a stuck-open mic cannot record forever.
 const MAX_TURN_MS: u64 = 25_000;
+/// The same ceiling while merely watching for his name, which is far shorter
+/// because nothing good comes of a long one: the name is a word, the audio is
+/// posted to the brain to be checked, and — since the listening thread is
+/// inside this recording — nothing else can be serviced until it ends.
+const WAKE_MAX_TURN_MS: u64 = 6_000;
 /// Audio kept before speech is detected, so his name is never clipped off the
 /// front of the very utterance that contains it.
 const PREROLL_MS: u64 = 700;
@@ -88,7 +96,38 @@ struct EarState {
     listening: AtomicBool,
     level: AtomicU8,
     cancel: AtomicBool,
+    /// Set the moment a deliberate turn is asked for. Name-spotting polls it
+    /// and drops what it is doing, because a `Cmd::Listen` sitting in the
+    /// channel is invisible from inside a recording — the hotkey would
+    /// otherwise do nothing at all until the current watch ended.
+    wanted: AtomicBool,
 }
+
+/// How one recording is bounded, and whether it defers to a deliberate turn.
+#[derive(Clone, Copy)]
+struct Turn {
+    /// Give up if nothing is ever said within this long.
+    give_up_ms: u64,
+    /// Stop and send what there is once the turn has run this long.
+    max_ms: u64,
+    /// Whether to abandon the recording when the user asks to talk.
+    yields: bool,
+}
+
+/// A turn the user asked for: it already has the mic, and yields to nobody.
+const DELIBERATE: Turn = Turn {
+    give_up_ms: NO_SPEECH_MS,
+    max_ms: MAX_TURN_MS,
+    yields: false,
+};
+
+/// Waiting to hear his name. Silence is the normal state of a room he is
+/// waiting in, so this never gives up on it — but it does step aside.
+const WATCHING: Turn = Turn {
+    give_up_ms: u64::MAX,
+    max_ms: WAKE_MAX_TURN_MS,
+    yields: true,
+};
 
 pub struct Ear {
     tx: Option<Sender<Cmd>>,
@@ -164,8 +203,12 @@ impl Ear {
             return true;
         }
         self.state.cancel.store(false, Ordering::SeqCst);
+        // Tell name-spotting to let go before queueing the command, so the
+        // recording it is inside ends now rather than up to a ceiling later.
+        self.state.wanted.store(true, Ordering::SeqCst);
         self.state.listening.store(true, Ordering::SeqCst);
         if tx.send(Cmd::Listen { hour }).is_err() {
+            self.state.wanted.store(false, Ordering::SeqCst);
             self.state.listening.store(false, Ordering::SeqCst);
             return false;
         }
@@ -231,7 +274,9 @@ fn run(
             }
             Ok(Cmd::Cancel) => {}
             Ok(Cmd::Listen { hour }) => {
-                // A deliberate turn gets the device to itself.
+                // A deliberate turn gets the device to itself. The request has
+                // been picked up, so name-spotting need not keep standing down.
+                state.wanted.store(false, Ordering::SeqCst);
                 watch_rec = None;
                 take_turn(&client, &base, &settings, &state, &ears, hour, None);
             }
@@ -261,7 +306,7 @@ fn take_turn(
     let pcm = match preloaded {
         Some(p) => Some(p),
         None => match Recorder::open(&settings.lock()) {
-            Some(rec) => record_turn(&rec, state, NO_SPEECH_MS).map(|(pcm, _)| pcm),
+            Some(rec) => record_turn(&rec, state, DELIBERATE).map(|(pcm, _)| pcm),
             None => {
                 tracing::warn!("mic: no usable input device");
                 None
@@ -308,9 +353,7 @@ fn watch_tick(
     }
     let Some(recorder) = rec.as_ref() else { return };
 
-    // Only listen for an utterance; never give up on silence, because silence
-    // is the normal state of a room he is waiting in.
-    let Some((pcm, _)) = record_turn(recorder, state, u64::MAX) else {
+    let Some((pcm, _)) = record_turn(recorder, state, WATCHING) else {
         return;
     };
 
@@ -388,8 +431,9 @@ fn converse(
 fn record_turn(
     rec: &Recorder,
     state: &Arc<EarState>,
-    give_up_ms: u64,
+    turn: Turn,
 ) -> Option<(Vec<u8>, u8)> {
+    let give_up_ms = turn.give_up_ms;
     let mut pre: VecDeque<Vec<u8>> = VecDeque::new();
     let mut pre_bytes = 0usize;
     let preroll_cap = (SOURCE_RATE as usize * 2 * PREROLL_MS as usize) / 1000;
@@ -404,8 +448,19 @@ fn record_turn(
     let mut speaking = false;
     let mut quiet_since: Option<Instant> = None;
 
+    let mut audio_since: Option<Instant> = None;
+    // The quietest the room actually got once we were judging it. If this
+    // never falls below the bar, the bar was measured wrong — which is
+    // invisible from the peak alone.
+    let mut quietest: u8 = u8::MAX;
+
     loop {
         if state.cancel.swap(false, Ordering::SeqCst) {
+            return None;
+        }
+        // Stand down for a turn the user actually asked for. `wanted` stays
+        // set; the command loop clears it when it picks the turn up.
+        if turn.yields && state.wanted.load(Ordering::Relaxed) {
             return None;
         }
         std::thread::sleep(Duration::from_millis(16));
@@ -417,8 +472,8 @@ fn record_turn(
 
         // Establish the room before judging anything against it.
         let Some(thresh) = threshold else {
-            samples.push(level);
             if !chunk.is_empty() {
+                audio_since.get_or_insert_with(Instant::now);
                 pre_bytes += chunk.len();
                 pre.push_back(chunk);
                 while pre_bytes > preroll_cap {
@@ -427,7 +482,18 @@ fn record_turn(
                     }
                 }
             }
-            if started.elapsed() >= Duration::from_millis(CALIBRATE_MS) {
+            // Only sample the room once the device is actually delivering.
+            // Opening a stream takes longer than the calibration window, so
+            // timing this from the loop start measured audio that had not
+            // arrived yet: every sample zero, floor 0, bar at the minimum —
+            // and then ordinary room tone read as continuous speech, so the
+            // turn only ever ended at the ceiling.
+            if audio_since.is_some() {
+                samples.push(level);
+            }
+            let settled = audio_since
+                .is_some_and(|t| t.elapsed() >= Duration::from_millis(CALIBRATE_MS));
+            if settled || started.elapsed() >= Duration::from_millis(CALIBRATE_CAP_MS) {
                 floor = quiet_level(&mut samples);
                 let t = speech_bar(floor);
                 tracing::info!(
@@ -439,6 +505,8 @@ fn record_turn(
             }
             continue;
         };
+
+        quietest = quietest.min(level);
 
         if speaking {
             pcm.extend_from_slice(&chunk);
@@ -473,7 +541,8 @@ fn record_turn(
                 let q = *quiet_since.get_or_insert_with(Instant::now);
                 if q.elapsed() >= Duration::from_millis(SILENCE_MS) {
                     tracing::info!(
-                        "mic: turn ended — {:.1}s, peak {peak} (floor {floor})",
+                        "mic: turn ended — {:.1}s, peak {peak}, quietest {quietest} \
+                         (floor {floor}, bar {thresh})",
                         secs(pcm.len())
                     );
                     return Some((pcm, peak));
@@ -489,8 +558,13 @@ fn record_turn(
             );
             return None;
         }
-        if waited >= Duration::from_millis(MAX_TURN_MS) {
-            tracing::info!("mic: hit the {MAX_TURN_MS}ms ceiling; sending what there is");
+        if waited >= Duration::from_millis(turn.max_ms) {
+            tracing::info!(
+                "mic: hit the {}ms ceiling; {} (peak {peak}, quietest {quietest}, \
+                 floor {floor}, bar {thresh})",
+                turn.max_ms,
+                if speaking { "sending what there is" } else { "nothing was said" },
+            );
             return if speaking { Some((pcm, peak)) } else { None };
         }
     }
@@ -607,6 +681,48 @@ mod tests {
         // If the room were still being measured when the poke timeout fired,
         // every click would close before speech could ever be detected.
         assert!(CALIBRATE_MS * 4 < NO_SPEECH_MS);
+        // Waiting for the device to wake must not eat the whole give-up
+        // window, or a slow mic would look identical to an empty room.
+        assert!(CALIBRATE_CAP_MS > CALIBRATE_MS);
+        assert!(CALIBRATE_CAP_MS < NO_SPEECH_MS);
+    }
+
+    #[test]
+    fn watching_yields_but_a_deliberate_turn_does_not() {
+        // The hotkey is invisible from inside a recording, so name-spotting
+        // has to poll for it. A deliberate turn must never stand down — it
+        // would abandon the very turn the flag was set to ask for.
+        assert!(WATCHING.yields);
+        assert!(!DELIBERATE.yields);
+    }
+
+    #[test]
+    fn watching_holds_the_thread_far_more_briefly() {
+        // Nothing else is serviced while a watch is recording, so its ceiling
+        // bounds how long the hotkey can appear dead in the worst case.
+        assert!(WATCHING.max_ms < DELIBERATE.max_ms);
+        assert!(WATCHING.max_ms <= 8_000);
+        // Long enough to still contain a name plus its pre-roll.
+        assert!(WATCHING.max_ms > PREROLL_MS + SPEECH_MS + SILENCE_MS);
+        // Watching waits out silence forever; only a deliberate turn gives up.
+        assert_eq!(WATCHING.give_up_ms, u64::MAX);
+        assert_eq!(DELIBERATE.give_up_ms, NO_SPEECH_MS);
+    }
+
+    #[test]
+    fn a_room_of_zeros_is_not_a_measured_floor() {
+        // The regression: levels read before the device delivers are all zero,
+        // so the floor came out 0 and the bar sat at the minimum, which room
+        // tone then cleared continuously — every turn ran to the ceiling.
+        let mut nothing: Vec<u8> = vec![];
+        assert_eq!(quiet_level(&mut nothing), 0);
+        assert_eq!(speech_bar(0), MIN_THRESHOLD);
+
+        // Measured from real audio instead, an idling headset sits above it.
+        let mut room = vec![6, 7, 6, 8, 7, 6, 9, 7, 6, 7, 8, 6];
+        let floor = quiet_level(&mut room);
+        assert!(floor >= 6, "floor {floor} should reflect the room, not silence");
+        assert!(speech_bar(floor) > 9, "bar must clear the room's own tone");
     }
 
     #[test]
