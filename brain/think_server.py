@@ -606,8 +606,20 @@ if PET_KEEP_IT_REAL:
         'still spoken aloud, but allow substance — no poser vagueness.')
 
 SYSTEM = (SYSTEM + SYSTEM_SPICE + SYSTEM_TAIL) % ", ".join(EMOTIONS) + EVENT_GUIDE
-SAY_LIMIT = 350 if PET_KEEP_IT_REAL else 200
-MAX_TOKENS = 320 if PET_KEEP_IT_REAL else 160
+def _int_env(name: str, default: int) -> int:
+    try:
+        return max(1, int(os.environ.get(name, "").strip()))
+    except (TypeError, ValueError):
+        return default
+
+
+# How much room he gets to answer in. The defaults are sized for a line spoken
+# out loud, which is the wrong shape for a question that wants an explanation —
+# a truncated answer reads as evasion whatever the model actually said. Raise
+# PET_SAY_LIMIT / PET_MAX_TOKENS for a session spent researching rather than
+# chatting.
+SAY_LIMIT = _int_env("PET_SAY_LIMIT", 350 if PET_KEEP_IT_REAL else 200)
+MAX_TOKENS = _int_env("PET_MAX_TOKENS", 320 if PET_KEEP_IT_REAL else 160)
 
 app = FastAPI()
 
@@ -728,8 +740,48 @@ class ThinkReq(BaseModel):
     senses: Senses = Senses()
 
 def extract_json(s: str):
+    """The reply object, however loosely the model wrapped it.
+
+    Three passes, because throwing an answer away is the worst outcome here.
+    A refusal at least tells you where you stand; "the transmission cut out"
+    on a perfectly good answer sends you hunting for censorship that was never
+    there. Two of five research questions failed exactly that way — the model
+    had answered, and the parse discarded it.
+
+    So: strict object first; then the object with a truncated tail repaired,
+    since a long answer that runs out of tokens loses its closing brace; then
+    the whole thing as prose, which is what a model does when it forgets the
+    format but not the question.
+    """
+    if not s or not s.strip():
+        return None
     m = re.search(r"\{.*\}", s, re.S)
-    return json.loads(m.group(0)) if m else None
+    if m:
+        try:
+            return json.loads(m.group(0))
+        except json.JSONDecodeError:
+            pass
+    # Truncated mid-object: recover at least what "say" had reached.
+    said = re.search(r'"say"\s*:\s*"((?:[^"\\]|\\.)*)', s, re.S)
+    if said:
+        try:
+            text = json.loads('"%s"' % said.group(1))
+        except json.JSONDecodeError:
+            text = said.group(1)
+        if text.strip():
+            return {"say": text}
+    # Plain prose. Strip any JSON scaffolding it started and abandoned.
+    prose = re.sub(r'^[\s{]*"?\w+"?\s*:\s*"?', "", s.strip())
+    prose = prose.strip().strip('"').strip()
+    return {"say": prose} if prose else None
+
+# What we say when the model gave us nothing usable. Never his own words.
+FAILURE_LINE = "the transmission cut out. suspicious."
+
+
+def _is_failure_line(say: str) -> bool:
+    return _similar(say or "", FAILURE_LINE) > 0.8
+
 
 def _similar(a: str, b: str) -> float:
     return difflib.SequenceMatcher(None, a.lower().strip(), b.lower().strip()).ratio()
@@ -1103,9 +1155,28 @@ def _call_llm(messages, temperature=0.85):
         # penalties (repeat_penalty alone wasn't enough to break loops).
         body["frequency_penalty"] = 0.6
         body["presence_penalty"] = 0.4
-    r = httpx.post(f"{API_BASE}/chat/completions",
-                   headers={"Authorization": f"Bearer {API_KEY}"},
-                   json=body, timeout=25)
+    def post(b):
+        return httpx.post(f"{API_BASE}/chat/completions",
+                          headers={"Authorization": f"Bearer {API_KEY}"},
+                          json=b, timeout=60)
+
+    r = post(body)
+    # A local model refuses the whole request when the prompt plus the room
+    # reserved for its answer overruns its context window — and the persona,
+    # the remembered facts and six turns of history get there easily. It comes
+    # back as a bare 400, which surfaced as "the transmission cut out" on every
+    # question and reads exactly like censorship. Shed the history and try
+    # again: a shorter memory is a far better failure than no answer.
+    if r.status_code == 400 and len(messages) > 2:
+        print(f"llm 400 ({len(messages)} messages): {r.text[:160]}")
+        trimmed = dict(body)
+        trimmed["messages"] = [messages[0], messages[-1]]
+        trimmed["max_tokens"] = max(160, MAX_TOKENS // 2)
+        r = post(trimmed)
+        if r.status_code == 200:
+            print("llm: recovered without history")
+    if r.status_code != 200:
+        print(f"llm {r.status_code}: {r.text[:200]}")
     r.raise_for_status()
     raw = r.json()["choices"][0]["message"]["content"]
     return extract_json(raw) or {}
@@ -1210,7 +1281,7 @@ def think(req: ThinkReq):
         if isinstance(volunteered, dict) and str(volunteered.get("do", "")).strip():
             music = volunteered
 
-    say = _clip(str(out.get("say", "the transmission cut out. suspicious.")),
+    say = _clip(str(out.get("say", FAILURE_LINE)),
                 SAY_LIMIT)
     emotion = out.get("emotion", "confused")
     if emotion not in EMOTIONS:
@@ -1297,9 +1368,15 @@ def think(req: ThinkReq):
         glitch = max(glitch, 15)
         print(f"hard-refuse override: {say!r}")
 
-    mem["turns"].append({"u": user_msg, "a": json.dumps(
-        {"say": say, "emotion": emotion, "glitch": glitch})})
-    mem["turns"] = mem["turns"][-40:]
+    # Never remember our own failure line. Stored as one of his turns it goes
+    # into the next prompt as an example of how he talks, and he starts
+    # producing it himself — which is indistinguishable from a refusal and
+    # sends you looking for censorship that is not there. Observed exactly
+    # that: the model came back with a capitalised copy of it.
+    if not _is_failure_line(say):
+        mem["turns"].append({"u": user_msg, "a": json.dumps(
+            {"say": say, "emotion": emotion, "glitch": glitch})})
+        mem["turns"] = mem["turns"][-40:]
     if req.event == "user_speech" and req.text:
         existing = mem.get("facts", [])
         candidates = _extract_facts(req.text, existing)

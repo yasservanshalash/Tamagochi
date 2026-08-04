@@ -96,6 +96,23 @@ for said in [
 ]:
     check(f"not a command: {said!r}", ts.music_intent(said), None)
 
+# --- extract_json -----------------------------------------------------------
+# Throwing away a real answer is worse than a refusal: it reads as censorship
+# that was never there. Two of five research questions failed exactly so.
+check("clean object", ts.extract_json(chr(123) + '"say": "hello"' + chr(125))["say"], "hello")
+check("object with chatter around it",
+      ts.extract_json("Sure! " + chr(123) + '"say": "hi"' + chr(125) + " hope that helps")["say"], "hi")
+check("truncated mid-object still yields what it had",
+      ts.extract_json(chr(123) + '"say": "it goes like this and then'),
+      {"say": "it goes like this and then"})
+check("escaped quotes survive the repair",
+      ts.extract_json(chr(123) + r'"say": "he said \"go\" and left'),
+      {"say": 'he said "go" and left'})
+check("plain prose is an answer, not a failure",
+      ts.extract_json("no json here, just the actual answer")["say"],
+      "no json here, just the actual answer")
+check("empty is still nothing", ts.extract_json("   "), None)
+
 if fails:
     print(f"FAILED {len(fails)}:")
     for f in fails:
