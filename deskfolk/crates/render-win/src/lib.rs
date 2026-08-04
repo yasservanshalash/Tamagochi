@@ -41,6 +41,8 @@ mod desktop;
 mod flyout;
 #[cfg(windows)]
 mod hotkey;
+/// The desktop's own windows, as surfaces he can stand on.
+pub mod ledges;
 /// Pure data — no Win32 — so the menu a host describes typechecks everywhere.
 mod menu;
 #[cfg(windows)]
@@ -176,6 +178,18 @@ impl Companion {
     /// Logical size, before display scaling.
     pub fn size(&self) -> (i32, i32) {
         self.size
+    }
+
+    /// Put him somewhere, in screen pixels — the same path a drag takes, so a
+    /// walk and a drag cannot disagree about where he is.
+    pub fn move_to(&self, x: i32, y: i32) {
+        window::move_to(self.hwnd, &self.shared, x, y);
+    }
+
+    /// The ledges on the desktop right now, front-most first. His own window
+    /// is excluded; he cannot stand on himself.
+    pub fn ledges(&self) -> Vec<ledges::Ledge> {
+        window::ledges_excluding(self.hwnd)
     }
 
     /// The monitor's scale factor — 1.0 at 96 DPI, 1.5 at 150% scaling.

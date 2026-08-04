@@ -29,6 +29,7 @@ mod config;
 mod ear;
 mod journal;
 mod mind;
+mod stroll;
 mod paths;
 mod runtime;
 mod voice;
@@ -542,6 +543,19 @@ fn companion_loop(
     let mut last = Instant::now();
     let mut last_raise = Instant::now();
 
+    // Movement. The gait comes from the package: a `walk` clip makes him walk,
+    // and without one he hops, because sliding a seated sprite across the
+    // screen reads as a bug rather than as movement.
+    let gait = stroll::Gait::of(
+        rt.lock().engine.package().manifest.clips.contains_key("walk"),
+    );
+    let wander = std::env::var("DESKFOLK_WANDER").as_deref() != Ok("off");
+    if wander {
+        tracing::info!("wander: on, {gait:?} — he will move between your windows");
+    }
+    let mut walk = stroll::Stroll::new(stroll::REST_MIN.as_millis() as i64);
+    let mut roll: u32 = 0;
+
     loop {
         std::thread::sleep(period);
 
@@ -552,6 +566,11 @@ fn companion_loop(
         if now.duration_since(last_raise) > RAISE_EVERY {
             last_raise = now;
             companion.raise();
+        }
+
+        if wander {
+            roll = roll.wrapping_add(1);
+            wander_tick(&companion, &rt, &mut walk, gait, dt, roll);
         }
 
         let hour = local_hour();
@@ -595,6 +614,86 @@ fn companion_loop(
             companion.present(frame);
         }
     }
+}
+
+/// One tick of wandering: read the desktop, decide, move.
+///
+/// The engine is not involved in *where* he is — it owns what he is doing, and
+/// position is the window's business — but a step plays through it so the hop
+/// or the walk cycle animates the same way any other emotion does.
+fn wander_tick(
+    companion: &Companion,
+    rt: &Arc<Mutex<Runtime>>,
+    walk: &mut stroll::Stroll,
+    gait: stroll::Gait,
+    dt: i64,
+    roll: u32,
+) {
+    // He only wanders when he has nothing better to do. Walking off mid-answer
+    // would be worse than standing still.
+    let free = {
+        let guard = rt.lock();
+        !guard.engine.is_asleep()
+            && !guard.inputs.busy
+            && !guard.inputs.voice_pending
+            && !guard.inputs.voice_audible
+    };
+
+    let (x, _) = companion.position();
+    let (w, h) = companion.size();
+    match walk.tick(dt, x, gait, free) {
+        stroll::Step::Stay => {}
+        stroll::Step::Move { x, y, animate } => {
+            companion.move_to(x, y);
+            if animate {
+                let _ = rt.lock().engine.play_emotion(gait.emotion(), 0, 0);
+            }
+        }
+        stroll::Step::Arrived { on } => {
+            tracing::debug!("wander: settled on {on:?}");
+            journal::did(format!("moved to sit on {on:?}"));
+            walk.rest(on, rest_for(roll));
+            return;
+        }
+    }
+
+    // Mid-journey, or not yet restless: nothing to decide, and no reason to
+    // enumerate every window on the desktop this frame.
+    if !free || walk.is_walking() || !walk.restless() {
+        if roll % 500 == 0 {
+            tracing::debug!(
+                "wander: waiting — free={free}, walking={}, restless={}",
+                walk.is_walking(),
+                walk.restless()
+            );
+        }
+        return;
+    }
+    // Time to consider somewhere new.
+    let ledges = companion.ledges();
+    let resting_on = match walk {
+        stroll::Stroll::Resting { on, .. } => on.clone(),
+        _ => String::new(),
+    };
+    match stroll::pick(&ledges, x + w / 2, &resting_on, roll) {
+        Some(l) => {
+            // His feet are the bottom of the stage, so sitting *on* an edge
+            // means his window bottom lands there, not his top.
+            let target_x = l.clamp_x(x + w / 2, w / 2) - w / 2;
+            tracing::debug!("wander: setting off for {:?}", l.title);
+            walk.walk_to(l.title.clone(), target_x, l.top - h);
+        }
+        // Nowhere worth going: wait before asking again rather than
+        // re-scanning the whole desktop every frame.
+        None => walk.rest(resting_on, rest_for(roll)),
+    }
+}
+
+/// A rest somewhere between the two bounds, varied so he is not metronomic.
+fn rest_for(roll: u32) -> i64 {
+    let lo = stroll::REST_MIN.as_millis() as i64;
+    let hi = stroll::REST_MAX.as_millis() as i64;
+    lo + (roll as i64 * 7919) % (hi - lo).max(1)
 }
 
 /// Where the cursor is in his coordinate space, so he can look at it.

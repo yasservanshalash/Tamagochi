@@ -50,6 +50,9 @@ use crate::{Config, Frame, Host};
 const WM_FRAME: u32 = WM_APP + 1;
 /// Shut the window down from another thread.
 const WM_QUIT_COMPANION: u32 = WM_APP + 2;
+/// He was moved by something other than a drag — a walk, or a ledge shifting
+/// under him. Position changed, the frame did not.
+const WM_MOVED: u32 = WM_APP + 3;
 
 const CLASS_NAME: &str = "DeskfolkCompanion";
 static REGISTER: Once = Once::new();
@@ -453,6 +456,13 @@ unsafe extern "system" fn wndproc(
             return 0;
         }
 
+        WM_MOVED => {
+            if let Some(state) = state_of(hwnd) {
+                state.repaint(hwnd);
+            }
+            return 0;
+        }
+
         WM_QUIT_COMPANION => {
             DestroyWindow(hwnd);
             return 0;
@@ -491,6 +501,47 @@ pub(crate) fn present(hwnd: isize, shared: &Shared, frame: Frame) {
             PostMessageW(hwnd as HWND, WM_FRAME, 0, 0);
         }
     }
+}
+
+/// Move him, from any thread.
+///
+/// Writes the same two atomics a drag does and then asks the window thread to
+/// repaint, so walking and dragging cannot end up with different ideas about
+/// where he is. `WM_MOVED` rather than `WM_FRAME` because there may be no new
+/// frame to show — standing still on a moving ledge is a position change and
+/// nothing else.
+pub(crate) fn move_to(hwnd: isize, shared: &Shared, x: i32, y: i32) {
+    let same = shared.x.load(Ordering::Relaxed) == x && shared.y.load(Ordering::Relaxed) == y;
+    if same {
+        return;
+    }
+    shared.x.store(x, Ordering::Relaxed);
+    shared.y.store(y, Ordering::Relaxed);
+    unsafe {
+        PostMessageW(hwnd as HWND, WM_MOVED, 0, 0);
+    }
+}
+
+/// The desktop's ledges, with his own window left out of them.
+pub(crate) fn ledges_excluding(hwnd: isize) -> Vec<crate::ledges::Ledge> {
+    let mut area = RECT { left: 0, top: 0, right: 1920, bottom: 1080 };
+    unsafe {
+        SystemParametersInfoW(
+            SPI_GETWORKAREA,
+            0,
+            &mut area as *mut RECT as *mut std::ffi::c_void,
+            0,
+        );
+    }
+    crate::ledges::scan(
+        hwnd,
+        crate::ledges::RectLike {
+            left: area.left,
+            top: area.top,
+            right: area.right,
+            bottom: area.bottom,
+        },
+    )
 }
 
 pub(crate) fn close(hwnd: isize) {

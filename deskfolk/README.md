@@ -367,6 +367,72 @@ mic: turn ended — 1.6s, peak 37 (floor 2)
 The rest, all in `ear.rs`: speech must hold for 110ms, a turn ends after 1s of
 silence, and it gives up after 4s of nothing or 25s of anything.
 
+## Where he goes
+
+He reads the desktop as a set of surfaces and sits on one. Every 45–150s he
+picks a window, crosses to it, and perches on its top edge — so where he is
+says something about what you are doing. `DESKFOLK_WANDER=off` pins him.
+
+`ledges.rs` is the nearest thing Windows offers to a DOM: every top-level
+window is a rectangle with a title and a stacking order, and the top edge of
+one is a shelf. What counts as a ledge is deliberately narrow, because
+enumerating top-level windows returns a great deal that is not a window in the
+sense a user means:
+
+| Rejected | Why |
+|---|---|
+| Hidden, minimised, zero-size | Not on screen |
+| `WS_EX_TOOLWINDOW` | Palettes and helpers are not places |
+| **Cloaked** (`DWMWA_CLOAKED`) | **Passes every classic test** — visible, real rectangle — but is suspended on another virtual desktop. Filtering on `IsWindowVisible` alone perches him on nothing |
+| Untitled, or under 220×120 | Furniture |
+| Top edge outside the work area | A maximised window's edge is flush with the screen; an off-screen one is not on it |
+
+Windows half off-screen are clipped to what is visible, so he cannot walk off
+the side of one. The desktop floor is always in the list, last, so closing
+everything leaves him standing rather than stranded.
+
+`stroll.rs` holds the decision — when to set off, where to stop, when to give
+up — as a pure state machine over plain numbers, with the desktop reading and
+the window moving on either side. It is the part that is easy to get subtly
+wrong and impossible to check by watching him for a few minutes.
+
+He only wanders when idle: never mid-answer, mid-sentence or asleep. An
+interrupted walk holds its place and resumes rather than restarting.
+
+### The walk cycle he does not have yet
+
+There is no walk animation in the package — every sprite is seated or
+standing — so he **hops**, using the existing `jump` clip. A static sprite slid
+across the screen reads as a bug; a hop reads as intent.
+
+`Gait::of` picks whichever the package actually provides, so adding a `walk`
+clip switches him to walking and changes nothing else. To add one:
+
+- `img_y_walk0`–`img_y_walk3`, a four-frame side view **facing right** (six is
+  smoother). Left is mirrored in code.
+- `img_y_stand`, a neutral standing pose for between steps.
+- Same 412×412 canvas as every other sprite, and — the one that matters —
+  **feet on the same baseline** (`anchor_y` 386), or he will jolt vertically
+  each time he changes gait.
+- Hard alpha edges, no anti-aliased halo. See `tools/check_sprites.py`.
+
+Then in `character.json`:
+
+```json
+"walk": [
+  {"img": "img_y_walk0", "ms": 90}, {"img": "img_y_walk1", "ms": 90},
+  {"img": "img_y_walk2", "ms": 90}, {"img": "img_y_walk3", "ms": 90}
+]
+```
+and `"walk": {"clip": "walk"}` under `emotions`.
+
+### Other operating systems
+
+This is Windows-only, and not incidentally: the companion is a Win32 layered
+window and the ledges come from `EnumWindows` and DWM. macOS and Linux each
+need their own renderer and their own window-enumeration backend behind the
+same `Host` trait — real work, not a flag.
+
 ## His journal
 
 Every day he keeps one, at
