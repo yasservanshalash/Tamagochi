@@ -180,6 +180,56 @@ def _wav_to_pcm16k(wav: bytes) -> bytes:
          "-ac", "1", "pipe:1"],
         input=wav, timeout=30, capture_output=True, check=True).stdout
 
+# Ordered most specific first: "turn it down" must not be read as "play it".
+_MUSIC_INTENTS = [
+    ("next",     r"\b(?:skip|next)\b(?:\s+(?:this|the|a|one|it))?\s*"
+                 r"(?:song|track|tune|joint)?\b"),
+    ("previous", r"\b(?:previous|prev)\b|\bgo back\b|\bback (?:a|one) (?:song|track)\b"
+                 r"|\blast (?:song|track)\b|\breplay\b"),
+    ("louder",   r"\bturn (?:it|the (?:music|volume)) up\b|\blouder\b|\bvolume up\b"
+                 r"|\bcrank (?:it|this)\b|\bpump it\b"),
+    ("quieter",  r"\bturn (?:it|the (?:music|volume)) down\b|\bquieter\b|\bvolume down\b"
+                 r"|\blower (?:it|the volume)\b|\bturn it down\b"),
+    ("mute",     r"\bmute\b|\bshut (?:it|the music) up\b|\bsilence\b"),
+    ("pause",    r"\b(?:pause|stop)\b(?:\s+(?:the\s+)?(?:music|song|track|it|this))?\b"),
+    ("resume",   r"\b(?:resume|unpause)\b|\bkeep (?:it )?playing\b|\bplay it again\b"
+                 r"|\bstart (?:the )?music\b"),
+    # The query is optional: bare "play" is the button on a remote.
+    ("play",     r"\b(?:put on|play|throw on|stick on)\b(?:\s+(?P<q>.+))?"),
+]
+_MUSIC_RE = [(verb, re.compile(pat, re.I)) for verb, pat in _MUSIC_INTENTS]
+# Words that mean he is talking *about* music, not asking for it.
+_NOT_A_COMMAND = re.compile(
+    r"\b(?:do you|can you|could you|would you|what|why|how|who|when|remember|think|like)\b"
+    r".{0,24}\b(?:play|music|song)\b|\bplaying\b\s+(?:games?|around)", re.I)
+
+
+def music_intent(text: str):
+    """What he is being asked to do to the music, if anything.
+
+    Matched here rather than left to the model. A model that agrees in words —
+    "aight, turnin it up" — while omitting the field is worse than one that
+    refuses: the user hears yes and nothing happens. Hermes did exactly that
+    on most attempts, and no amount of insisting in the prompt fixed it
+    reliably. The phrasing for "skip this" is small and closed enough to match
+    outright, so the deterministic thing does the deterministic job and the
+    model is left to talk.
+    """
+    t = (text or "").strip()
+    if not t or _NOT_A_COMMAND.search(t):
+        return None
+    for verb, rx in _MUSIC_RE:
+        m = rx.search(t)
+        if not m:
+            continue
+        if verb == "play":
+            q = (m.groupdict().get("q") or "").strip(" .!?,")
+            # "play" on its own is the button, not a search.
+            return {"do": "play", "query": q} if q else {"do": "resume", "query": ""}
+        return {"do": verb, "query": ""}
+    return None
+
+
 def _clip(s: str, limit: int) -> str:
     """Cut to `limit` on a boundary, never mid-word.
 
@@ -526,6 +576,10 @@ Reply with STRICT JSON ONLY, no markdown, exactly:
  after one line. Other verbs RARELY, only when they truly fit (curious ->
  camera; tired -> sleep). Default none only when you truly said it to
  nobody.>"}
+
+MUSIC: you can work the music on this machine — skip, pause, volume, put
+something on. When he asks, just answer naturally as if you are doing it,
+because you are; the machinery is handled for you.
 
 TRIPPING: RARELY — roughly one reply in eight, not most of them — a thought
 gets away from you mid-sentence and goes somewhere strange. When it does,
@@ -1143,6 +1197,19 @@ def think(req: ThinkReq):
         action = "none"
     if req.event == "user_speech" and action == "none":
         action = "listen"    # replying to a human ALWAYS re-opens the ears
+    # What he wants done to the music, if anything. Kept as a plain verb plus
+    # an optional query and validated on the app side, which owns the short
+    # list of things that can actually be done — the model inventing "shuffle"
+    # should do nothing rather than be guessed at.
+    # What he was actually asked wins over what the model volunteered.
+    music = music_intent(req.text)
+    if music is None:
+        volunteered = out.get("music")
+        if isinstance(volunteered, str):
+            volunteered = {"do": volunteered, "query": ""}
+        if isinstance(volunteered, dict) and str(volunteered.get("do", "")).strip():
+            music = volunteered
+
     say = _clip(str(out.get("say", "the transmission cut out. suspicious.")),
                 SAY_LIMIT)
     emotion = out.get("emotion", "confused")
@@ -1251,4 +1318,4 @@ def think(req: ThinkReq):
     print(f"[{time.strftime('%H:%M:%S')}] {req.event} -> {emotion} g={glitch}"
           f"{' [voice]' if audio else ''}: {say}")
     return {"say": say, "emotion": emotion, "glitch": glitch,
-            "audio": audio, "action": action}
+            "audio": audio, "action": action, "music": music}

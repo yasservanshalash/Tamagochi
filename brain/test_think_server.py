@@ -60,6 +60,42 @@ check("euphemism ban present", "No euphemism" in ts.SYSTEM, True)
 check("ai self-reference banned", "Never call yourself an AI" in ts.SYSTEM, True)
 check("hate limit survives", "no slurs" in ts.SYSTEM, True)
 
+# --- music intent -----------------------------------------------------------
+# Matched deterministically rather than left to the model, which agreed in
+# words and omitted the field on most attempts.
+for said, want in [
+    ("yo skip this song", "next"),
+    ("skip it", "next"),
+    ("next track", "next"),
+    ("go back a track", "previous"),
+    ("turn it up a bit", "louder"),
+    ("louder man", "louder"),
+    ("turn it down", "quieter"),
+    ("mute it", "mute"),
+    ("pause the music for a sec", "pause"),
+    ("stop it", "pause"),
+    ("keep playing", "resume"),
+]:
+    got = ts.music_intent(said)
+    check(f"intent {said!r}", got and got["do"], want)
+
+got = ts.music_intent("put on some madvillain")
+check("play carries the query", got, {"do": "play", "query": "some madvillain"})
+check("bare play is the button, not a search",
+      ts.music_intent("play"), {"do": "resume", "query": ""})
+
+# Talking *about* music is not an instruction to touch it. Getting this wrong
+# means he skips your track because you mentioned a song.
+for said in [
+    "what music do you like",
+    "do you play games",
+    "why is this song so good",
+    "remember when we played that",
+    "how you doing man",
+    "",
+]:
+    check(f"not a command: {said!r}", ts.music_intent(said), None)
+
 if fails:
     print(f"FAILED {len(fails)}:")
     for f in fails:

@@ -29,6 +29,7 @@ mod config;
 mod ear;
 mod journal;
 mod mind;
+mod music;
 mod stroll;
 mod paths;
 mod runtime;
@@ -504,6 +505,7 @@ fn boot_companion(app: &AppHandle) -> anyhow::Result<()> {
             tracing::info!("he replied to speech: {:?} ({})", h.say, h.emotion);
             mind::remember_exchange(&mind, &h.heard, &h.say);
             let has_audio = voice.speak(&h.say);
+            mind::obey_music(h.music.as_ref());
             // Spoken turns never pass through `mind::ask` — the ear talks to
             // the brain itself — so this is the only place they can be
             // journalled, and they are the most interesting entries there are.

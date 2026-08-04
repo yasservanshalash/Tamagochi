@@ -78,6 +78,23 @@ pub struct ThinkReply {
     pub glitch: u8,
     #[serde(default)]
     pub action: String,
+    /// Something to do to whatever is playing. Separate from `action` because
+    /// it happens *alongside* what he says and does — he can skip a track and
+    /// still be listening to you — where `action` is what his body does next.
+    #[serde(default)]
+    pub music: Option<MusicWish>,
+}
+
+/// A request to the music, as the mind words it. Validated by the app, which
+/// owns the small set of things that can actually be done.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+pub struct MusicWish {
+    /// `next`, `louder`, `pause`, `play`, …
+    #[serde(default, alias = "action", alias = "cmd")]
+    pub r#do: String,
+    /// What to put on, when the verb is `play`.
+    #[serde(default, alias = "track", alias = "q")]
+    pub query: String,
 }
 
 impl ThinkReply {

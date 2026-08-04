@@ -43,6 +43,13 @@ reqwest = { version = "0.12", default-features = false, features = [
 # device via an env var, which is not a thing a shipped product can ask of a user.
 cpal = "0.16"
 
-# Raw Win32 used to live here to fight the webview's window frame. The
-# companion is a native layered window now, so every one of those workarounds —
-# and the dependency they needed — belongs to `deskfolk-render-win` instead.
+# Raw Win32 came back, but for the OS rather than for the window: the media
+# keys he presses to work the music, and reading Spotify's window title to see
+# what is playing. Everything to do with *drawing* him still lives in
+# `deskfolk-render-win`, which is the boundary that mattered.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_WindowsAndMessaging",
+] }

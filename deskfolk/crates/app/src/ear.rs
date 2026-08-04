@@ -75,6 +75,11 @@ pub struct Heard {
     /// The transcript, so the conversation can be remembered as text.
     #[serde(default)]
     pub heard: String,
+    /// Anything he wants done to the music. Spoken turns never pass through
+    /// `mind::ask`, so without this they are the one path where "skip this"
+    /// would be understood and then ignored.
+    #[serde(default)]
+    pub music: Option<deskfolk_ai::MusicWish>,
 }
 
 #[derive(Debug, Deserialize)]

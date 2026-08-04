@@ -12,6 +12,7 @@ use deskfolk_engine::Reply;
 use parking_lot::Mutex;
 
 use crate::journal;
+use crate::music;
 use crate::runtime::Runtime;
 use crate::voice::Voice;
 
@@ -78,6 +79,26 @@ fn worth_speaking(event: &str) -> bool {
         std::env::var("DESKFOLK_VOICE_SELF_TALK").as_deref(),
         Ok("1" | "true" | "on")
     )
+}
+
+/// Do whatever the reply asked of the music, if anything.
+///
+/// Separate from the emotion and the action because it is not mutually
+/// exclusive with either: he can skip a track *and* answer you in the same
+/// breath, which is what a person in the room would do.
+pub fn obey_music(wish: Option<&deskfolk_ai::MusicWish>) {
+    let Some(w) = wish else { return };
+    let Some(parsed) = music::Wish::parse(&w.r#do, &w.query) else {
+        if !w.r#do.trim().is_empty() {
+            tracing::debug!("music: ignoring invented verb {:?}", w.r#do);
+        }
+        return;
+    };
+    if music::grant(&parsed) {
+        journal::did(parsed.describe());
+    } else {
+        journal::trouble(format!("{} — needs the Spotify Web API", parsed.describe()));
+    }
 }
 
 /// Record a spoken exchange, so what he was told out loud is part of the same
@@ -152,6 +173,7 @@ pub fn ask(
                 } else {
                     false
                 };
+                obey_music(reply.music.as_ref());
                 journal::said(journal::Said {
                     event: event.clone(),
                     heard: text.clone(),
