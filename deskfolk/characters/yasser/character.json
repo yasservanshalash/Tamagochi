@@ -744,35 +744,43 @@
       "frames": [
         {
           "img": "img_y_walkl0",
-          "ms": 136
+          "ms": 108
         },
         {
           "img": "img_y_walkl1",
-          "ms": 136
+          "ms": 108
         },
         {
           "img": "img_y_walkl2",
-          "ms": 136
+          "ms": 108
         },
         {
           "img": "img_y_walkl3",
-          "ms": 136
+          "ms": 108
         },
         {
           "img": "img_y_walkl4",
-          "ms": 136
+          "ms": 108
         },
         {
           "img": "img_y_walkl5",
-          "ms": 136
+          "ms": 108
         },
         {
           "img": "img_y_walkl6",
-          "ms": 136
+          "ms": 108
         },
         {
           "img": "img_y_walkl7",
-          "ms": 136
+          "ms": 108
+        },
+        {
+          "img": "img_y_walkl8",
+          "ms": 108
+        },
+        {
+          "img": "img_y_walkl9",
+          "ms": 108
         }
       ],
       "loop": true
@@ -781,35 +789,43 @@
       "frames": [
         {
           "img": "img_y_walkr0",
-          "ms": 136
+          "ms": 108
         },
         {
           "img": "img_y_walkr1",
-          "ms": 136
+          "ms": 108
         },
         {
           "img": "img_y_walkr2",
-          "ms": 136
+          "ms": 108
         },
         {
           "img": "img_y_walkr3",
-          "ms": 136
+          "ms": 108
         },
         {
           "img": "img_y_walkr4",
-          "ms": 136
+          "ms": 108
         },
         {
           "img": "img_y_walkr5",
-          "ms": 136
+          "ms": 108
         },
         {
           "img": "img_y_walkr6",
-          "ms": 136
+          "ms": 108
         },
         {
           "img": "img_y_walkr7",
-          "ms": 136
+          "ms": 108
+        },
+        {
+          "img": "img_y_walkr8",
+          "ms": 108
+        },
+        {
+          "img": "img_y_walkr9",
+          "ms": 108
         }
       ],
       "loop": true

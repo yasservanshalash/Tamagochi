@@ -44,6 +44,10 @@ pub struct AppState {
     audio: Arc<Mutex<audio::AudioSettings>>,
     voice: Arc<Voice>,
     ear: Arc<Ear>,
+    /// "Go for a walk that way, now." Set from the menu and consumed by the
+    /// wander loop, because the loop owns the journey and the menu handler
+    /// runs on another thread entirely.
+    nudge: Arc<Mutex<Option<stroll::Facing>>>,
 }
 
 /// Menu ids are `deskfolk::out::<device name>` / `::in::<device name>`, so the
@@ -550,11 +554,13 @@ fn boot_companion(app: &AppHandle) -> anyhow::Result<()> {
         ear::Ears { on_reply, on_idle, on_wake, on_thinking },
     ));
 
+    let nudge: Arc<Mutex<Option<stroll::Facing>>> = Arc::new(Mutex::new(None));
     app.manage(AppState {
         rt: rt.clone(),
         audio: audio_settings.clone(),
         voice: voice.clone(),
         ear: ear.clone(),
+        nudge: nudge.clone(),
     });
 
     let host = Arc::new(CompanionHost {
@@ -601,7 +607,7 @@ fn boot_companion(app: &AppHandle) -> anyhow::Result<()> {
 
     std::thread::Builder::new()
         .name("deskfolk-companion-loop".into())
-        .spawn(move || companion_loop(companion, rt, mind, voice, ear))?;
+        .spawn(move || companion_loop(companion, rt, mind, voice, ear, nudge))?;
 
     Ok(())
 }
@@ -620,6 +626,7 @@ fn companion_loop(
     mind: Arc<Mind>,
     voice: Arc<Voice>,
     ear: Arc<Ear>,
+    nudge: Arc<Mutex<Option<stroll::Facing>>>,
 ) {
     let period = Duration::from_millis(LOOP_MS);
     let mut last = Instant::now();
@@ -655,7 +662,7 @@ fn companion_loop(
 
         if wander {
             roll = roll.wrapping_add(1);
-            wander_tick(&companion, &rt, &mut walk, gait, walker_h, dt, roll);
+            wander_tick(&companion, &rt, &mut walk, gait, walker_h, dt, roll, &nudge);
         }
 
         let hour = local_hour();
@@ -714,6 +721,7 @@ fn wander_tick(
     walker_h: u32,
     dt: i64,
     roll: u32,
+    nudge: &Arc<Mutex<Option<stroll::Facing>>>,
 ) {
     // He only wanders when he has nothing better to do. Walking off mid-answer
     // would be worse than standing still.
@@ -763,6 +771,19 @@ fn wander_tick(
         }
     }
 
+    // Asked for a walk from the menu: go now, that way, wherever he is in his
+    // resting time. Taken before the restless check, which is the whole point.
+    let asked = nudge.lock().take();
+    if let Some(dir) = asked {
+        if free {
+            if let Some((title, target_x, target_y)) = far_end(companion, dir) {
+                tracing::debug!("wander: asked to walk {dir:?} toward {title:?}");
+                walk.walk_to(title, x, target_x, target_y, roll);
+                return;
+            }
+        }
+    }
+
     // Mid-journey, or not yet restless: nothing to decide, and no reason to
     // enumerate every window on the desktop this frame.
     if !free || walk.is_walking() || !walk.restless() {
@@ -801,6 +822,33 @@ fn wander_tick(
         // re-scanning the whole desktop every frame.
         None => walk.rest(resting_on, rest_for(roll)),
     }
+}
+
+/// The far end of whatever he is standing on, in the given direction.
+///
+/// Used when a walk is asked for rather than chosen: the destination is not
+/// interesting, the journey is, so he heads for the end of his own ledge.
+fn far_end(
+    companion: &Companion,
+    dir: stroll::Facing,
+) -> Option<(String, i32, i32)> {
+    let ledges = companion.ledges();
+    let (x, _) = companion.position();
+    let (w, _) = companion.size();
+    let centre = x + w / 2;
+    let here = ledges
+        .iter()
+        .find(|l| (l.left..=l.right).contains(&centre))
+        .or_else(|| ledges.last())?;
+    let target = match dir {
+        stroll::Facing::Left => here.left + w / 2,
+        stroll::Facing::Right => here.right - w / 2,
+    };
+    Some((
+        here.title.clone(),
+        target - w / 2,
+        here.top - companion.feet_offset(),
+    ))
 }
 
 /// How tall he is drawn, in art pixels, taken from the walk art itself.
@@ -902,6 +950,19 @@ fn on_menu(app: &AppHandle, id: &str) {
     // Play an animation on demand, for looking at one while working on it.
     if let Some(name) = id.strip_prefix(ANIM_PREFIX) {
         if let Some(state) = app.try_state::<AppState>() {
+            // Walking in place is not what walking looks like. Asking for it
+            // from the menu sends him on an actual journey, and the clip then
+            // plays as a side effect of travelling.
+            let dir = match name {
+                "walk" => Some(stroll::Facing::Left),
+                "walk_right" => Some(stroll::Facing::Right),
+                _ => None,
+            };
+            if let Some(dir) = dir {
+                *state.nudge.lock() = Some(dir);
+                tracing::info!("animation test: walking {dir:?} across the screen");
+                return;
+            }
             let mut guard = state.rt.lock();
             // Wake him first: asleep, the sleep clip owns the base and
             // whatever was asked for would never be seen.

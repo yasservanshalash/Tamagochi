@@ -154,3 +154,21 @@ fn dance_cycles_its_music_note_overlay() {
     assert!(dance.fx.len() > 1);
     assert!(dance.fx_ms > 0);
 }
+
+#[test]
+fn each_walk_clip_uses_the_frames_named_for_its_direction() {
+    // The art faces one way; the mirror faces the other. Wiring them the wrong
+    // way round is invisible in code and unmistakable on screen — he slides
+    // along facing backwards. Naming is the only thing that pins it down, so
+    // the naming is what gets checked.
+    let p = yasser();
+    for (clip, want) in [("walk", "img_y_walkl"), ("walk_right", "img_y_walkr")] {
+        for f in &p.clip(clip).expect(clip).frames {
+            assert!(
+                f.img.starts_with(want),
+                "clip '{clip}' uses '{}', which is the other direction's art",
+                f.img
+            );
+        }
+    }
+}
