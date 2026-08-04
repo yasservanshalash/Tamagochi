@@ -239,10 +239,15 @@ pub(crate) fn situation(req: &ThinkRequest) -> String {
         "wake_greet" => s.push_str("(you just woke up — say something)"),
         // Each idle prompt names a different angle, because "say whatever is
         // on your mind" asked repeatedly gets the same answer repeatedly.
+        // Thoughts are meant to stack. Asking for a subject he has *not*
+        // raised recently produced the opposite of an inner life: a stream of
+        // unrelated trivia, each line arriving from nowhere. His own musings
+        // are in the history, so continuing one is simply a matter of asking.
         "self_talk" => s.push_str(
-            "(nobody said anything. Say something unprompted — a thought, a \
-             complaint, something you noticed, a memory, a question. Pick a \
-             subject you have not brought up recently.)",
+            "(nobody said anything. Say one unprompted thought. Look at what \
+             you last mused about: if that thread is still live, continue it — \
+             take it further, land it, or change your mind about it. Start a \
+             new one only when the old is finished.)",
         ),
         "long_session" => s.push_str(&format!(
             "(they have been at this machine for about {} hours without a real              break. Say something about it in your own voice - concerned,              teasing, whatever fits you. Do not lecture and do not list health              advice.)",
