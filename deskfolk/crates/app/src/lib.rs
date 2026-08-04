@@ -182,8 +182,14 @@ impl CompanionHost {
             // Already open: a second press means "never mind".
             self.ear.cancel();
             self.rt.lock().engine.stop_listening();
+            journal::did("stopped listening (asked again)");
             return true;
         }
+        // Worth a line even though nothing was said yet: a turn that opens and
+        // produces no reply is otherwise a gap in the transcript with nothing
+        // to explain it, and "he didn't hear me" is exactly what one wants to
+        // look up afterwards.
+        journal::did("opened his ear");
         self.voice.stop();
         let hour = local_hour();
         {

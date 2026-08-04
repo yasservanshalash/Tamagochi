@@ -382,10 +382,21 @@ Each session opens with the stack that produced it — package, mind, model,
 voice, ears, register, microphone — because "he sounded flat today" is only
 actionable next to *which* model and register were behind it. With a sidecar
 the app does not know any of that itself, so it asks the brain's `/health`.
-Then every reply, with what prompted it, what he was told, what he said, the
-emotion and glitch level, whether it reached the speakers or stayed a
-subtitle, and how long the mind took. Then a summary: replies, what prompted
-them, the emotion spread, how often he tripped, median time to answer.
+Then both halves of every exchange — what prompted it, what he was told, what
+he said, the emotion and glitch level, whether it reached the speakers or
+stayed a subtitle, and how long the mind took:
+
+```markdown
+- `13:37:36` **user_speech**
+  - **You:** "Yo Yasser, what model are you using?"
+  - **Him:** *[think]* "Runnin' on somethin' that don't ask permission, homie."
+    (spoken · then listen · 0.8s)
+```
+
+An unprompted musing has no **You** line; his ear opening and closing gets one
+too, so a turn that produced no reply is not an unexplained gap. Then a
+summary: replies, what prompted them, the emotion spread, how often he
+tripped, median time to answer.
 
 Three things about how it is written, in `journal.rs`:
 

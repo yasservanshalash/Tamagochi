@@ -184,17 +184,20 @@ impl Journal {
 
     fn said(&self, e: Said) {
         let stamp = Local::now().format("%H:%M:%S");
-        let mut out = format!("- `{stamp}` **{}**", e.event);
+        // Both halves of the exchange get their own labelled line. Hanging
+        // what was said off the event on one line technically recorded it,
+        // but a transcript is read for the conversation, and the human half
+        // of it should not be the part you have to go looking for.
+        let mut out = format!("- `{stamp}` **{}**\n", e.event);
         if !e.heard.trim().is_empty() {
-            out.push_str(&format!(" ← \"{}\"", one_line(&e.heard)));
+            out.push_str(&format!("  - **You:** \"{}\"\n", one_line(&e.heard)));
         }
-        out.push_str(&format!(
-            "\n  *[{}", if e.emotion.is_empty() { "?" } else { &e.emotion }
-        ));
+        out.push_str("  - **Him:** *[");
+        out.push_str(if e.emotion.is_empty() { "?" } else { &e.emotion });
         if e.glitch >= TRIPPING_AT {
             out.push_str(&format!(" glitch {}", e.glitch));
         }
-        out.push_str(&format!("]* \"{}\"", one_line(&e.say)));
+        out.push_str(&format!("]* \"{}\"\n", one_line(&e.say)));
 
         let mut tags = vec![if e.spoken { "spoken".to_string() } else { "subtitle".to_string() }];
         if !e.action.is_empty() && e.action != "none" {
@@ -203,7 +206,7 @@ impl Journal {
         if !e.took.is_zero() {
             tags.push(format!("{:.1}s", e.took.as_secs_f32()));
         }
-        out.push_str(&format!("\n  ({})\n", tags.join(" · ")));
+        out.push_str(&format!("    ({})\n", tags.join(" · ")));
         self.write(&out);
 
         let mut inner = self.inner.lock();
@@ -350,9 +353,27 @@ mod tests {
         let text = std::fs::read_to_string(&j.path).expect("read");
         assert!(text.contains("**Mind:** hermes"), "stack in header: {text}");
         assert!(text.contains("user_speech"), "event: {text}");
-        assert!(text.contains("\"hey\""), "reply: {text}");
+        assert!(text.contains("**You:** \"yo\""), "what he was told: {text}");
+        assert!(text.contains("**Him:** *[think]* \"hey\""), "reply: {text}");
         assert!(text.contains("spoken"), "voice status: {text}");
         assert!(text.contains("1.2s"), "latency: {text}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_unprompted_thought_has_no_you_line_to_invent() {
+        let dir = std::env::temp_dir().join("deskfolk-journal-musing");
+        let _ = std::fs::remove_dir_all(&dir);
+        let j = Journal::open(&dir, "yasser", vec![]).expect("journal");
+        j.said(Said {
+            event: "self_talk".into(),
+            say: "hm".into(),
+            emotion: "idle".into(),
+            ..Default::default()
+        });
+        let text = std::fs::read_to_string(&j.path).expect("read");
+        assert!(!text.contains("**You:**"), "nobody spoke: {text}");
+        assert!(text.contains("**Him:**"), "he did: {text}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
