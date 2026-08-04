@@ -1,0 +1,124 @@
+{
+ "canvas": [
+  372,
+  278
+ ],
+ "feet": 278,
+ "groups": {
+  "arms_crossed": [
+   "img_y_hd_arms_crossed0",
+   "img_y_hd_arms_crossed1"
+  ],
+  "cheer": [
+   "img_y_hd_cheer0",
+   "img_y_hd_cheer1"
+  ],
+  "dance": [
+   "img_y_hd_dance0",
+   "img_y_hd_dance1",
+   "img_y_hd_dance2"
+  ],
+  "drink": [
+   "img_y_hd_drink0",
+   "img_y_hd_drink1",
+   "img_y_hd_drink2",
+   "img_y_hd_drink3"
+  ],
+  "facepalm": [
+   "img_y_hd_facepalm0",
+   "img_y_hd_facepalm1"
+  ],
+  "jump": [
+   "img_y_hd_jump0",
+   "img_y_hd_jump1",
+   "img_y_hd_jump2",
+   "img_y_hd_jump3",
+   "img_y_hd_jump4"
+  ],
+  "laptop": [
+   "img_y_hd_laptop0",
+   "img_y_hd_laptop1",
+   "img_y_hd_laptop2"
+  ],
+  "phone": [
+   "img_y_hd_phone0",
+   "img_y_hd_phone1",
+   "img_y_hd_phone2"
+  ],
+  "point": [
+   "img_y_hd_point0",
+   "img_y_hd_point1",
+   "img_y_hd_point2"
+  ],
+  "run": [
+   "img_y_hd_run0",
+   "img_y_hd_run1",
+   "img_y_hd_run2",
+   "img_y_hd_run3",
+   "img_y_hd_run4"
+  ],
+  "shrug": [
+   "img_y_hd_shrug0",
+   "img_y_hd_shrug1",
+   "img_y_hd_shrug2"
+  ],
+  "sit_down": [
+   "img_y_hd_sit_down0",
+   "img_y_hd_sit_down1",
+   "img_y_hd_sit_down2",
+   "img_y_hd_sit_down3",
+   "img_y_hd_sit_down4",
+   "img_y_hd_sit_down5"
+  ],
+  "sleep": [
+   "img_y_hd_sleep0",
+   "img_y_hd_sleep1"
+  ],
+  "stand": [
+   "img_y_hd_stand0",
+   "img_y_hd_stand1",
+   "img_y_hd_stand2",
+   "img_y_hd_stand3",
+   "img_y_hd_stand4",
+   "img_y_hd_stand5"
+  ],
+  "take_coffee": [
+   "img_y_hd_take_coffee0",
+   "img_y_hd_take_coffee1",
+   "img_y_hd_take_coffee2",
+   "img_y_hd_take_coffee3"
+  ],
+  "thinking": [
+   "img_y_hd_thinking0",
+   "img_y_hd_thinking1",
+   "img_y_hd_thinking2"
+  ],
+  "turn": [
+   "img_y_hd_turn0",
+   "img_y_hd_turn1",
+   "img_y_hd_turn2",
+   "img_y_hd_turn3",
+   "img_y_hd_turn4",
+   "img_y_hd_turn5"
+  ],
+  "walk": [
+   "img_y_hd_walk0",
+   "img_y_hd_walk1",
+   "img_y_hd_walk2",
+   "img_y_hd_walk3",
+   "img_y_hd_walk4",
+   "img_y_hd_walk5"
+  ],
+  "wave": [
+   "img_y_hd_wave0",
+   "img_y_hd_wave1",
+   "img_y_hd_wave2"
+  ],
+  "yawn": [
+   "img_y_hd_yawn0",
+   "img_y_hd_yawn1",
+   "img_y_hd_yawn2",
+   "img_y_hd_yawn3"
+  ]
+ }
+}

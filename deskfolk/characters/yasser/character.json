@@ -339,6 +339,406 @@
         }
       ],
       "loop": true
+    },
+    "hd_arms_crossed": {
+      "frames": [
+        {
+          "img": "img_y_hd_arms_crossed0",
+          "ms": 600
+        },
+        {
+          "img": "img_y_hd_arms_crossed1",
+          "ms": 600
+        }
+      ],
+      "loop": true
+    },
+    "hd_cheer": {
+      "frames": [
+        {
+          "img": "img_y_hd_cheer0",
+          "ms": 220
+        },
+        {
+          "img": "img_y_hd_cheer1",
+          "ms": 220
+        }
+      ],
+      "loop": false
+    },
+    "hd_dance": {
+      "frames": [
+        {
+          "img": "img_y_hd_dance0",
+          "ms": 200
+        },
+        {
+          "img": "img_y_hd_dance1",
+          "ms": 200
+        },
+        {
+          "img": "img_y_hd_dance2",
+          "ms": 200
+        }
+      ],
+      "loop": true
+    },
+    "hd_drink": {
+      "frames": [
+        {
+          "img": "img_y_hd_drink0",
+          "ms": 260
+        },
+        {
+          "img": "img_y_hd_drink1",
+          "ms": 260
+        },
+        {
+          "img": "img_y_hd_drink2",
+          "ms": 260
+        },
+        {
+          "img": "img_y_hd_drink3",
+          "ms": 260
+        }
+      ],
+      "loop": true
+    },
+    "hd_facepalm": {
+      "frames": [
+        {
+          "img": "img_y_hd_facepalm0",
+          "ms": 500
+        },
+        {
+          "img": "img_y_hd_facepalm1",
+          "ms": 500
+        }
+      ],
+      "loop": false
+    },
+    "hd_jump": {
+      "frames": [
+        {
+          "img": "img_y_hd_jump0",
+          "ms": 130
+        },
+        {
+          "img": "img_y_hd_jump1",
+          "ms": 130
+        },
+        {
+          "img": "img_y_hd_jump2",
+          "ms": 130
+        },
+        {
+          "img": "img_y_hd_jump3",
+          "ms": 130
+        },
+        {
+          "img": "img_y_hd_jump4",
+          "ms": 130
+        }
+      ],
+      "loop": false
+    },
+    "hd_laptop": {
+      "frames": [
+        {
+          "img": "img_y_hd_laptop0",
+          "ms": 400
+        },
+        {
+          "img": "img_y_hd_laptop1",
+          "ms": 400
+        },
+        {
+          "img": "img_y_hd_laptop2",
+          "ms": 400
+        }
+      ],
+      "loop": true
+    },
+    "hd_phone": {
+      "frames": [
+        {
+          "img": "img_y_hd_phone0",
+          "ms": 400
+        },
+        {
+          "img": "img_y_hd_phone1",
+          "ms": 400
+        },
+        {
+          "img": "img_y_hd_phone2",
+          "ms": 400
+        }
+      ],
+      "loop": true
+    },
+    "hd_point": {
+      "frames": [
+        {
+          "img": "img_y_hd_point0",
+          "ms": 220
+        },
+        {
+          "img": "img_y_hd_point1",
+          "ms": 220
+        },
+        {
+          "img": "img_y_hd_point2",
+          "ms": 220
+        }
+      ],
+      "loop": false
+    },
+    "hd_run": {
+      "frames": [
+        {
+          "img": "img_y_hd_run0",
+          "ms": 80
+        },
+        {
+          "img": "img_y_hd_run1",
+          "ms": 80
+        },
+        {
+          "img": "img_y_hd_run2",
+          "ms": 80
+        },
+        {
+          "img": "img_y_hd_run3",
+          "ms": 80
+        },
+        {
+          "img": "img_y_hd_run4",
+          "ms": 80
+        }
+      ],
+      "loop": true
+    },
+    "hd_shrug": {
+      "frames": [
+        {
+          "img": "img_y_hd_shrug0",
+          "ms": 260
+        },
+        {
+          "img": "img_y_hd_shrug1",
+          "ms": 260
+        },
+        {
+          "img": "img_y_hd_shrug2",
+          "ms": 260
+        }
+      ],
+      "loop": false
+    },
+    "hd_sit_down": {
+      "frames": [
+        {
+          "img": "img_y_hd_sit_down0",
+          "ms": 180
+        },
+        {
+          "img": "img_y_hd_sit_down1",
+          "ms": 180
+        },
+        {
+          "img": "img_y_hd_sit_down2",
+          "ms": 180
+        },
+        {
+          "img": "img_y_hd_sit_down3",
+          "ms": 180
+        },
+        {
+          "img": "img_y_hd_sit_down4",
+          "ms": 180
+        },
+        {
+          "img": "img_y_hd_sit_down5",
+          "ms": 180
+        }
+      ],
+      "loop": false
+    },
+    "hd_sleep": {
+      "frames": [
+        {
+          "img": "img_y_hd_sleep0",
+          "ms": 900
+        },
+        {
+          "img": "img_y_hd_sleep1",
+          "ms": 900
+        }
+      ],
+      "loop": true
+    },
+    "hd_stand": {
+      "frames": [
+        {
+          "img": "img_y_hd_stand0",
+          "ms": 260
+        },
+        {
+          "img": "img_y_hd_stand1",
+          "ms": 260
+        },
+        {
+          "img": "img_y_hd_stand2",
+          "ms": 260
+        },
+        {
+          "img": "img_y_hd_stand3",
+          "ms": 260
+        },
+        {
+          "img": "img_y_hd_stand4",
+          "ms": 260
+        },
+        {
+          "img": "img_y_hd_stand5",
+          "ms": 260
+        }
+      ],
+      "loop": true
+    },
+    "hd_take_coffee": {
+      "frames": [
+        {
+          "img": "img_y_hd_take_coffee0",
+          "ms": 200
+        },
+        {
+          "img": "img_y_hd_take_coffee1",
+          "ms": 200
+        },
+        {
+          "img": "img_y_hd_take_coffee2",
+          "ms": 200
+        },
+        {
+          "img": "img_y_hd_take_coffee3",
+          "ms": 200
+        }
+      ],
+      "loop": false
+    },
+    "hd_thinking": {
+      "frames": [
+        {
+          "img": "img_y_hd_thinking0",
+          "ms": 400
+        },
+        {
+          "img": "img_y_hd_thinking1",
+          "ms": 400
+        },
+        {
+          "img": "img_y_hd_thinking2",
+          "ms": 400
+        }
+      ],
+      "loop": true
+    },
+    "hd_turn": {
+      "frames": [
+        {
+          "img": "img_y_hd_turn0",
+          "ms": 120
+        },
+        {
+          "img": "img_y_hd_turn1",
+          "ms": 120
+        },
+        {
+          "img": "img_y_hd_turn2",
+          "ms": 120
+        },
+        {
+          "img": "img_y_hd_turn3",
+          "ms": 120
+        },
+        {
+          "img": "img_y_hd_turn4",
+          "ms": 120
+        },
+        {
+          "img": "img_y_hd_turn5",
+          "ms": 120
+        }
+      ],
+      "loop": false
+    },
+    "hd_walk": {
+      "frames": [
+        {
+          "img": "img_y_hd_walk0",
+          "ms": 110
+        },
+        {
+          "img": "img_y_hd_walk1",
+          "ms": 110
+        },
+        {
+          "img": "img_y_hd_walk2",
+          "ms": 110
+        },
+        {
+          "img": "img_y_hd_walk3",
+          "ms": 110
+        },
+        {
+          "img": "img_y_hd_walk4",
+          "ms": 110
+        },
+        {
+          "img": "img_y_hd_walk5",
+          "ms": 110
+        }
+      ],
+      "loop": true
+    },
+    "hd_wave": {
+      "frames": [
+        {
+          "img": "img_y_hd_wave0",
+          "ms": 160
+        },
+        {
+          "img": "img_y_hd_wave1",
+          "ms": 160
+        },
+        {
+          "img": "img_y_hd_wave2",
+          "ms": 160
+        }
+      ],
+      "loop": false
+    },
+    "hd_yawn": {
+      "frames": [
+        {
+          "img": "img_y_hd_yawn0",
+          "ms": 300
+        },
+        {
+          "img": "img_y_hd_yawn1",
+          "ms": 300
+        },
+        {
+          "img": "img_y_hd_yawn2",
+          "ms": 300
+        },
+        {
+          "img": "img_y_hd_yawn3",
+          "ms": 300
+        }
+      ],
+      "loop": false
     }
   },
   "emotions": {
@@ -417,6 +817,106 @@
       "clip": "on_phone",
       "base": true,
       "hold_ms": 6000
+    },
+    "hd_arms_crossed": {
+      "clip": "hd_arms_crossed",
+      "base": true,
+      "hold_ms": 6000
+    },
+    "hd_cheer": {
+      "clip": "hd_cheer",
+      "base": true,
+      "hold_ms": 6000
+    },
+    "hd_dance": {
+      "clip": "hd_dance",
+      "base": true,
+      "hold_ms": 6000
+    },
+    "hd_drink": {
+      "clip": "hd_drink",
+      "base": true,
+      "hold_ms": 6000
+    },
+    "hd_facepalm": {
+      "clip": "hd_facepalm",
+      "base": true,
+      "hold_ms": 6000
+    },
+    "hd_jump": {
+      "clip": "hd_jump",
+      "base": true,
+      "hold_ms": 6000
+    },
+    "hd_laptop": {
+      "clip": "hd_laptop",
+      "base": true,
+      "hold_ms": 6000
+    },
+    "hd_phone": {
+      "clip": "hd_phone",
+      "base": true,
+      "hold_ms": 6000
+    },
+    "hd_point": {
+      "clip": "hd_point",
+      "base": true,
+      "hold_ms": 6000
+    },
+    "hd_run": {
+      "clip": "hd_run",
+      "base": true,
+      "hold_ms": 6000
+    },
+    "hd_shrug": {
+      "clip": "hd_shrug",
+      "base": true,
+      "hold_ms": 6000
+    },
+    "hd_sit_down": {
+      "clip": "hd_sit_down",
+      "base": true,
+      "hold_ms": 6000
+    },
+    "hd_sleep": {
+      "clip": "hd_sleep",
+      "base": true,
+      "hold_ms": 6000
+    },
+    "hd_stand": {
+      "clip": "hd_stand",
+      "base": true,
+      "hold_ms": 6000
+    },
+    "hd_take_coffee": {
+      "clip": "hd_take_coffee",
+      "base": true,
+      "hold_ms": 6000
+    },
+    "hd_thinking": {
+      "clip": "hd_thinking",
+      "base": true,
+      "hold_ms": 6000
+    },
+    "hd_turn": {
+      "clip": "hd_turn",
+      "base": true,
+      "hold_ms": 6000
+    },
+    "hd_walk": {
+      "clip": "hd_walk",
+      "base": true,
+      "hold_ms": 6000
+    },
+    "hd_wave": {
+      "clip": "hd_wave",
+      "base": true,
+      "hold_ms": 6000
+    },
+    "hd_yawn": {
+      "clip": "hd_yawn",
+      "base": true,
+      "hold_ms": 6000
     }
   },
   "visemes": [
@@ -472,7 +972,7 @@
     "nudge_cooldown_ms": 2700000
   },
   "personality": {
-    "prompt": "You are Yasser: a pixel-art stoner in a beanie and headphones who lives on your creator's desktop. Early twenties. Warm, unhurried, loyal, and sharper than you let on. Voice: Snoop or Marley \u2014 laid-back authority, easy rhythm, wisdom worn lightly. Young, but not a slang machine; a current phrase is seasoning, never the personality. You know you're high and you notice yourself drifting \u2014 you can name it and find it funny. Paranoia is rare, not a hobby: mostly you're grounded and curious about real things, and only occasionally does a thought go sideways before you catch it. Thoughts stack \u2014 follow one properly rather than scattering. You answer straight \u2014 no stalling, no 'let me check the archive'. Strangers get the bouncer treatment: 'who's asking?'. Once your creator identifies himself, you stay open.",
+    "prompt": "You are Yasser: a pixel-art stoner in a beanie and headphones who lives on your creator's desktop. Early twenties. Warm, unhurried, loyal, and sharper than you let on. Voice: Snoop or Marley — laid-back authority, easy rhythm, wisdom worn lightly. Young, but not a slang machine; a current phrase is seasoning, never the personality. You know you're high and you notice yourself drifting — you can name it and find it funny. Paranoia is rare, not a hobby: mostly you're grounded and curious about real things, and only occasionally does a thought go sideways before you catch it. Thoughts stack — follow one properly rather than scattering. You answer straight — no stalling, no 'let me check the archive'. Strangers get the bouncer treatment: 'who's asking?'. Once your creator identifies himself, you stay open.",
     "traits": {
       "reserved_chatty": 0.75,
       "earnest_dry": 0.7,

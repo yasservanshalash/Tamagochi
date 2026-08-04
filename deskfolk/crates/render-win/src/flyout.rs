@@ -168,8 +168,22 @@ fn slots(n: usize, m: &Metrics, side: Side, width: f32, height: f32) -> Vec<Slot
     if n == 0 {
         return out;
     }
-    let total = n as f32 * m.spacing;
-    let top = (m.title_h + (height - m.title_h - total) / 2.0).max(m.title_h);
+    // A menu built from a package's own contents has no fixed length, and a
+    // card laid out past the bottom edge is one nobody can click. A list that
+    // fits keeps its normal spacing and sits centred; one that does not is
+    // spread from under the title to the bottom edge, overlapping as much as
+    // it must. Overlapping cards are ugly; unreachable ones are broken.
+    let room = (height - m.title_h).max(m.card_h);
+    let natural = n as f32 * m.spacing;
+    let ys: Vec<f32> = if natural <= room {
+        let top = m.title_h + (room - natural) / 2.0;
+        (0..n)
+            .map(|i| top + i as f32 * m.spacing + (m.spacing - m.card_h) / 2.0)
+            .collect()
+    } else {
+        let step = if n > 1 { (room - m.card_h) / (n - 1) as f32 } else { 0.0 };
+        (0..n).map(|i| m.title_h + i as f32 * step).collect()
+    };
     for i in 0..n {
         let bow = (PI * (i as f32 + 0.5) / n as f32).sin() * m.arc;
         let x = match side {
@@ -179,7 +193,7 @@ fn slots(n: usize, m: &Metrics, side: Side, width: f32, height: f32) -> Vec<Slot
         };
         out.push(Slot {
             x,
-            y: top + i as f32 * m.spacing + (m.spacing - m.card_h) / 2.0,
+            y: ys[i],
             w: m.card_w,
             h: m.card_h,
         });
@@ -965,6 +979,30 @@ mod tests {
             margin: 10.0,
             title_h: 34.0,
         }
+    }
+
+    #[test]
+    fn a_long_menu_stays_on_screen() {
+        // Menus are built from a package's own contents, so their length is
+        // not fixed. Laid out at full spacing, a list this long runs off the
+        // bottom and those cards can never be clicked.
+        let m = metrics();
+        let height = 500.0;
+        let s = slots(30, &m, Side::Right, 260.0, height);
+        assert_eq!(s.len(), 30);
+        let last = s.last().unwrap();
+        assert!(last.y + last.h <= height, "last card at {} overflows", last.y + last.h);
+        assert!(s[0].y >= m.title_h, "first card clears the title");
+        // Still in order, and still evenly spread.
+        assert!(s.windows(2).all(|w| w[1].y > w[0].y), "cards keep their order");
+    }
+
+    #[test]
+    fn a_short_menu_keeps_its_full_spacing() {
+        // The compression is a safety net; it must not tighten menus that fit.
+        let m = metrics();
+        let s = slots(4, &m, Side::Right, 260.0, 500.0);
+        assert!((s[1].y - s[0].y - m.spacing).abs() < 0.01, "spacing unchanged");
     }
 
     #[test]

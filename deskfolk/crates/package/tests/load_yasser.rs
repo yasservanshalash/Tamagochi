@@ -33,10 +33,40 @@ fn ships_clean_with_no_warnings() {
 
 #[test]
 fn carries_the_whole_alpha_behavior_table() {
+    // `hd_*` are preview frames from a newer sprite sheet, reachable only from
+    // the animation tester. Counting them here would mean this guard fired
+    // every time one was added, which is the opposite of what it is for: the
+    // behaviour table is what must not drift.
     let p = yasser();
-    assert_eq!(p.manifest.clips.len(), 20, "clip count drifted from the alpha");
-    assert_eq!(p.manifest.emotions.len(), 19, "emotion count drifted from the alpha");
+    let behaviour = |names: Vec<&String>| -> usize {
+        names.iter().filter(|n| !n.starts_with("hd_")).count()
+    };
+    assert_eq!(
+        behaviour(p.manifest.clips.keys().collect()),
+        20,
+        "clip count drifted from the alpha"
+    );
+    assert_eq!(
+        behaviour(p.manifest.emotions.keys().collect()),
+        19,
+        "emotion count drifted from the alpha"
+    );
     assert_eq!(p.manifest.visemes.len(), 4);
+}
+
+#[test]
+fn every_preview_animation_is_playable() {
+    // The tester lists emotions and plays them by name, so a preview clip with
+    // no emotion pointing at it is invisible from the menu.
+    let p = yasser();
+    let previews: Vec<&String> =
+        p.manifest.clips.keys().filter(|n| n.starts_with("hd_")).collect();
+    assert!(!previews.is_empty(), "the preview sheet should be imported");
+    for clip in previews {
+        let emo = p.manifest.emotions.get(clip);
+        assert!(emo.is_some(), "clip '{clip}' has no emotion, so nothing can play it");
+        assert_eq!(&emo.unwrap().clip, clip, "emotion '{clip}' points elsewhere");
+    }
 }
 
 #[test]

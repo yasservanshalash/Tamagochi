@@ -108,6 +108,7 @@ impl deskfolk_render_win::Host for CompanionHost {
             },
             MenuEntry::item("center", "Control Center").with_icon(Icon::Panel),
             MenuEntry::item("journal", "Today's log").with_icon(Icon::Panel),
+            MenuEntry::submenu("Test animations", Icon::Panel, animation_menu(&self.rt)),
             MenuEntry::Separator,
             MenuEntry::item("quit", "Quit Deskfolk").with_icon(Icon::Quit),
         ]
@@ -281,6 +282,84 @@ pub fn run() {
                 journal::finish();
             }
         });
+}
+
+/// Menu id prefix for "play this emotion now", used by the animation tester.
+const ANIM_PREFIX: &str = "deskfolk::anim::";
+
+/// How long a tested animation holds before he drops back to normal. Long
+/// enough to watch a loop go round more than once.
+const ANIM_HOLD_MS: i64 = 8_000;
+
+/// Which drawer each preview animation belongs in.
+///
+/// Grouped rather than listed flat because the menu is a column of cards: a
+/// single list of every emotion is taller than the screen, and the ones that
+/// fell off the bottom would be unreachable.
+const ANIM_GROUPS: [(&str, &[&str]); 3] = [
+    ("Moving", &["hd_walk", "hd_run", "hd_turn", "hd_jump", "hd_stand"]),
+    (
+        "Sitting",
+        &["hd_sit_down", "hd_drink", "hd_take_coffee", "hd_laptop", "hd_phone", "hd_sleep"],
+    ),
+    (
+        "Gestures",
+        &[
+            "hd_wave", "hd_point", "hd_shrug", "hd_facepalm", "hd_arms_crossed",
+            "hd_cheer", "hd_dance", "hd_yawn", "hd_thinking",
+        ],
+    ),
+];
+
+/// Every animation in the package, so a new one can be looked at without
+/// waiting for the situation that triggers it.
+///
+/// Anything the package has that is not in a named group still appears, under
+/// "Built-in" — adding a clip to `character.json` should be enough to be able
+/// to see it, without also having to remember to list it here.
+fn animation_menu(rt: &Arc<Mutex<Runtime>>) -> Vec<MenuEntry> {
+    let guard = rt.lock();
+    let have: Vec<String> =
+        guard.engine.package().manifest.emotions.keys().cloned().collect();
+    drop(guard);
+
+    let entry = |n: &str| MenuEntry::item(format!("{ANIM_PREFIX}{n}"), pretty(n));
+    let mut out = Vec::new();
+    let mut placed: Vec<&str> = Vec::new();
+    for (label, names) in ANIM_GROUPS {
+        let items: Vec<MenuEntry> = names
+            .iter()
+            .filter(|n| have.iter().any(|h| h == *n))
+            .map(|n| {
+                placed.push(n);
+                entry(n)
+            })
+            .collect();
+        if !items.is_empty() {
+            out.push(MenuEntry::submenu(label, Icon::Panel, items));
+        }
+    }
+    let mut rest: Vec<&String> =
+        have.iter().filter(|h| !placed.contains(&h.as_str())).collect();
+    rest.sort();
+    if !rest.is_empty() {
+        out.push(MenuEntry::submenu(
+            "Built-in",
+            Icon::Panel,
+            rest.iter().map(|n| entry(n)).collect(),
+        ));
+    }
+    out
+}
+
+/// `hd_arms_crossed` reads as "Arms crossed" in a menu.
+fn pretty(id: &str) -> String {
+    let words = id.strip_prefix("hd_").unwrap_or(id).replace('_', " ");
+    let mut c = words.chars();
+    match c.next() {
+        Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+        None => words,
+    }
 }
 
 /// What is running, for the journal's session header.
@@ -780,6 +859,22 @@ fn on_menu(app: &AppHandle, id: &str) {
         return;
     }
 
+    // Play an animation on demand, for looking at one while working on it.
+    if let Some(name) = id.strip_prefix(ANIM_PREFIX) {
+        if let Some(state) = app.try_state::<AppState>() {
+            let mut guard = state.rt.lock();
+            // Wake him first: asleep, the sleep clip owns the base and
+            // whatever was asked for would never be seen.
+            if guard.engine.is_asleep() {
+                let _ = guard.engine.wake_up();
+            }
+            let fx = guard.engine.play_emotion(name, 0, ANIM_HOLD_MS);
+            tracing::info!("animation test: {name} ({} effects)", fx.len());
+            journal::did(format!("animation {name:?} played from the test menu"));
+        }
+        return;
+    }
+
     match id {
         "quit" => {
             // Seal the day's journal before the process goes. Everything up to
@@ -915,4 +1010,35 @@ fn hotkey_label() -> String {
                 .join("+")
         })
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn animation_ids_round_trip_through_the_menu() {
+        // The dispatch strips this prefix to get the emotion name back, so the
+        // two have to agree or every entry silently does nothing.
+        let id = format!("{ANIM_PREFIX}hd_walk");
+        assert_eq!(id.strip_prefix(ANIM_PREFIX), Some("hd_walk"));
+        // And it must not collide with the device menus, which are matched
+        // first and would swallow it.
+        assert!(!id.starts_with(OUT_PREFIX));
+        assert!(!id.starts_with(IN_PREFIX));
+    }
+
+    #[test]
+    fn animation_labels_are_readable() {
+        assert_eq!(pretty("hd_arms_crossed"), "Arms crossed");
+        assert_eq!(pretty("hd_walk"), "Walk");
+        // Clips that were always there keep their own names.
+        assert_eq!(pretty("suspicious"), "Suspicious");
+        assert_eq!(pretty(""), "");
+    }
+
+    #[test]
+    fn a_tested_animation_is_held_long_enough_to_watch() {
+        assert!(ANIM_HOLD_MS > 4_000, "a loop should go round more than once");
+    }
 }

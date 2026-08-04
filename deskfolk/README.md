@@ -399,6 +399,46 @@ wrong and impossible to check by watching him for a few minutes.
 He only wanders when idle: never mid-answer, mid-sentence or asleep. An
 interrupted walk holds its place and resumes rather than restarting.
 
+### Trying animations out
+
+**Test animations** in his menu plays any clip on demand — *Moving*, *Sitting*,
+*Gestures*, and *Built-in* for the originals — so a new pose can be looked at
+without waiting for the situation that triggers it. It holds for 8 seconds,
+wakes him first if he is asleep, and records the play in the journal.
+
+The groups exist because the menu is a column of cards: one flat list of every
+emotion is taller than the screen, and the cards that fell off the bottom would
+be unreachable. `slots` now also refuses to overflow on its own — a list that
+does not fit is spread from under the title to the bottom edge, overlapping as
+much as it must, since overlapping cards are ugly but unreachable ones are
+broken.
+
+### Importing a sprite sheet
+
+`tools/slice_sheet.py <sheet.png> <outdir> [--contact]` cuts a generated sheet
+into frames. Three traps, all handled there and all worth knowing:
+
+- **Alpha.** The sheets have none, and the background is a near-black grey —
+  and so are his jacket, trousers and outlines. A global colour key eats them.
+  A border flood fill does not, but tolerance decides everything: at 34 it
+  leaks through his outline and strips the jacket; at 16 he comes out whole.
+- **Frames.** Gaps alone do not find them, because the orange captions merge
+  into the band and poses sharing a prop touch. The layout is declared in the
+  script, and gap detection runs only inside a group, checked against an
+  expected count; a shortfall is made up by halving the widest run, which is
+  what a merged pair actually is.
+- **Baseline.** Frames are bottom-aligned on a shared canvas with no margin
+  under the feet, because the renderer lands a sprite's *bottom edge* on the
+  stage anchor. Padding there hovers him by exactly that much.
+
+`--contact` writes one image of every frame it found; look at it before
+trusting a slice.
+
+The August sheet is imported as `hd_*` clips — preview only, reachable from the
+tester and used by nothing else, so his behaviour is unchanged. `Gait::of`
+looks for a clip called `walk`, so he keeps hopping until the set is promoted
+deliberately.
+
 ### The walk cycle he does not have yet
 
 There is no walk animation in the package — every sprite is seated or
