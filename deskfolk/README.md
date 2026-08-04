@@ -439,40 +439,40 @@ tester and used by nothing else, so his behaviour is unchanged. `Gait::of`
 looks for a clip called `walk`, so he keeps hopping until the set is promoted
 deliberately.
 
-### The walk cycle he does not have yet
+### The walk cycle
 
-There is no walk animation in the package — every sprite is seated or
-standing — so he **hops**: he keeps whatever pose he is in and travels in a
-half-sine arc, interpolated every frame. A static sprite slid flat across the
-screen reads as a bug; an arc reads as intent.
+He walks, using the six-frame cycle from the August sheet. `Gait::of` looks for
+a clip named `walk`; without one he falls back to **hopping** — keeping
+whatever pose he is in and travelling in a half-sine arc, because a static
+sprite slid flat across the screen reads as a bug where an arc reads as intent.
 
-Playing the package's `jump` clip for this was tried and is wrong. Its frames
-are the `img_y_big*` set, drawn at a visibly larger scale than the seated idle
-— sitting shows him in a beanbag, so the *person* fills much less of the
-canvas — and he ballooned every time he moved.
+Playing the package's `jump` clip for that hop was tried and is wrong. Its
+frames are the `img_y_big*` set, drawn at a visibly larger scale than the
+seated idle — sitting shows him in a beanbag, so the *person* fills much less
+of the canvas — and he ballooned every time he moved.
 
-`Gait::of` picks whichever the package actually provides, so adding a `walk`
-clip switches him to walking and changes nothing else. To add one:
+**Walking needs two clips, not one.** The renderer draws a sprite as it is and
+cannot mirror at draw time, so `walk_right` is a second, pre-flipped set of
+frames; the cycle as drawn faces left. Facing therefore comes out of the state
+machine (`Facing` on `Step::Move`) rather than being guessed by the caller —
+both names resolving to the same frames is the bug that has him moonwalking in
+one direction, and a package test now forbids it.
 
-- `img_y_walk0`–`img_y_walk3`, a four-frame side view **facing right** (six is
-  smoother). Left is mirrored in code.
-- `img_y_stand`, a neutral standing pose for between steps.
-- Same 412×412 canvas as every other sprite, and — the one that matters —
-  **feet on the same baseline** (`anchor_y` 386), or he will jolt vertically
-  each time he changes gait.
-- Drawn at the **same apparent scale as the seated idle**, not the `img_y_big*`
-  scale. That is the difference between him walking and him growing.
+**A ledge needs headroom.** He is 386px tall to the feet, so a title bar 200px
+from the top of the screen would put his head 186px above the display. Observed
+exactly that on Task Manager. `ledges` now requires clear space above a ledge
+equal to his feet offset before he will consider standing on it.
+
+Adding a walk cycle to another package needs:
+
+- A side view **facing one way**; the mirror is generated at import
+  (`tools/slice_sheet.py` writes the flipped frames).
+- A neutral standing pose for between steps.
+- **Feet on the bottom edge of the canvas**, since the renderer lands a
+  sprite's bottom on `anchor_y`. Any margin there hovers him.
+- The **same apparent scale as the seated idle**, not the `img_y_big*` scale.
+  That is the difference between walking and growing.
 - Hard alpha edges, no anti-aliased halo. See `tools/check_sprites.py`.
-
-Then in `character.json`:
-
-```json
-"walk": [
-  {"img": "img_y_walk0", "ms": 90}, {"img": "img_y_walk1", "ms": 90},
-  {"img": "img_y_walk2", "ms": 90}, {"img": "img_y_walk3", "ms": 90}
-]
-```
-and `"walk": {"clip": "walk"}` under `emotions`.
 
 ### Other operating systems
 

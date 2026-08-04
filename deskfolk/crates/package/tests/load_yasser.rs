@@ -41,17 +41,33 @@ fn carries_the_whole_alpha_behavior_table() {
     let behaviour = |names: Vec<&String>| -> usize {
         names.iter().filter(|n| !n.starts_with("hd_")).count()
     };
+    // 20 + 19 at the alpha; `walk` and `walk_right` joined the behaviour table
+    // when he stopped hopping and started walking for real.
     assert_eq!(
         behaviour(p.manifest.clips.keys().collect()),
-        20,
+        22,
         "clip count drifted from the alpha"
     );
     assert_eq!(
         behaviour(p.manifest.emotions.keys().collect()),
-        19,
+        21,
         "emotion count drifted from the alpha"
     );
     assert_eq!(p.manifest.visemes.len(), 4);
+}
+
+#[test]
+fn walking_has_a_mirrored_twin_that_is_actually_mirrored() {
+    // The renderer cannot flip a sprite at draw time, so facing right is a
+    // second set of pre-flipped frames. Both names pointing at the same images
+    // is the failure that has him moonwalking in one direction.
+    let p = yasser();
+    let left = p.clip("walk").expect("walk drives Gait::of; without it he hops");
+    let right = p.clip("walk_right").expect("no mirrored cycle");
+    assert_eq!(left.frames.len(), right.frames.len(), "cycles differ in length");
+    for (a, b) in left.frames.iter().zip(right.frames.iter()) {
+        assert_ne!(a.img, b.img, "'{}' is used for both directions", a.img);
+    }
 }
 
 #[test]

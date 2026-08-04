@@ -535,7 +535,7 @@ pub(crate) fn move_to(hwnd: isize, shared: &Shared, x: i32, y: i32) {
 }
 
 /// The desktop's ledges, with his own window left out of them.
-pub(crate) fn ledges_excluding(hwnd: isize) -> Vec<crate::ledges::Ledge> {
+pub(crate) fn ledges_excluding(hwnd: isize, headroom: i32) -> Vec<crate::ledges::Ledge> {
     let mut area = RECT { left: 0, top: 0, right: 1920, bottom: 1080 };
     unsafe {
         SystemParametersInfoW(
@@ -553,6 +553,7 @@ pub(crate) fn ledges_excluding(hwnd: isize) -> Vec<crate::ledges::Ledge> {
             right: area.right,
             bottom: area.bottom,
         },
+        headroom,
     )
 }
 

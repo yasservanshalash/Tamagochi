@@ -739,6 +739,64 @@
         }
       ],
       "loop": false
+    },
+    "walk": {
+      "frames": [
+        {
+          "img": "img_y_hd_walk0",
+          "ms": 110
+        },
+        {
+          "img": "img_y_hd_walk1",
+          "ms": 110
+        },
+        {
+          "img": "img_y_hd_walk2",
+          "ms": 110
+        },
+        {
+          "img": "img_y_hd_walk3",
+          "ms": 110
+        },
+        {
+          "img": "img_y_hd_walk4",
+          "ms": 110
+        },
+        {
+          "img": "img_y_hd_walk5",
+          "ms": 110
+        }
+      ],
+      "loop": true
+    },
+    "walk_right": {
+      "frames": [
+        {
+          "img": "img_y_hd_walkr0",
+          "ms": 110
+        },
+        {
+          "img": "img_y_hd_walkr1",
+          "ms": 110
+        },
+        {
+          "img": "img_y_hd_walkr2",
+          "ms": 110
+        },
+        {
+          "img": "img_y_hd_walkr3",
+          "ms": 110
+        },
+        {
+          "img": "img_y_hd_walkr4",
+          "ms": 110
+        },
+        {
+          "img": "img_y_hd_walkr5",
+          "ms": 110
+        }
+      ],
+      "loop": true
     }
   },
   "emotions": {
@@ -917,6 +975,16 @@
       "clip": "hd_yawn",
       "base": true,
       "hold_ms": 6000
+    },
+    "walk": {
+      "clip": "walk",
+      "base": true,
+      "hold_ms": 900
+    },
+    "walk_right": {
+      "clip": "walk_right",
+      "base": true,
+      "hold_ms": 900
     }
   },
   "visemes": [

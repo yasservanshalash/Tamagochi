@@ -205,10 +205,13 @@ impl Companion {
         window::move_to(self.hwnd, &self.shared, x, y);
     }
 
-    /// The ledges on the desktop right now, front-most first. His own window
-    /// is excluded; he cannot stand on himself.
+    /// The ledges on the desktop right now, front-most first.
+    ///
+    /// His own window is excluded — he cannot stand on himself — and so is
+    /// anything without room for him above it, using his feet offset as the
+    /// height to clear.
     pub fn ledges(&self) -> Vec<ledges::Ledge> {
-        window::ledges_excluding(self.hwnd)
+        window::ledges_excluding(self.hwnd, self.feet_offset())
     }
 
     /// The monitor's scale factor — 1.0 at 96 DPI, 1.5 at 150% scaling.

@@ -54,9 +54,14 @@ const MIN_LEDGE_HEIGHT: i32 = 120;
 ///
 /// Split out from the enumeration so the rules can be tested without a desktop:
 /// everything interesting here is the filtering, not the FFI.
+///
+/// `headroom` is how much clear space he needs above a ledge to stand on it.
+/// Without it he perches on the title bar of a window near the top of the
+/// screen and his head is cut off by the edge of the display.
 pub fn ledges_from(
     windows: impl IntoIterator<Item = (RectLike, String)>,
     work: RectLike,
+    headroom: i32,
 ) -> Vec<Ledge> {
     let mut out: Vec<Ledge> = windows
         .into_iter()
@@ -69,6 +74,11 @@ pub fn ledges_from(
             // on it. Requiring the edge to sit inside the work area covers
             // both, and keeps him off the sliver above a full-screen video.
             if r.top <= work.top || r.top >= work.bottom {
+                return None;
+            }
+            // He has to fit above it. A window whose title bar is nearer the
+            // top of the screen than he is tall would slice his head off.
+            if r.top - work.top < headroom {
                 return None;
             }
             // Clip to the visible desktop so he cannot walk off the side of a
@@ -183,14 +193,14 @@ mod win {
     /// Every ledge on the desktop right now, nearest the front first.
     ///
     /// `skip` is the companion's own window — he cannot stand on himself.
-    pub fn scan(skip: isize, work: RectLike) -> Vec<Ledge> {
+    pub fn scan(skip: isize, work: RectLike, headroom: i32) -> Vec<Ledge> {
         let mut scan = Scan { skip: skip as HWND, found: Vec::new() };
         unsafe {
             EnumWindows(Some(each), (&mut scan as *mut Scan) as LPARAM);
         }
         // EnumWindows walks front to back, which is the order he should prefer:
         // the window you are actually using is the interesting one to sit on.
-        ledges_from(scan.found, work)
+        ledges_from(scan.found, work, headroom)
     }
 }
 
@@ -211,20 +221,30 @@ mod tests {
 
     #[test]
     fn a_normal_window_offers_its_top_edge() {
-        let l = ledges_from(vec![(r(300, 200, 900, 700), "Editor".into())], work());
+        let l = ledges_from(vec![(r(300, 200, 900, 700), "Editor".into())], work(), 0);
         assert_eq!(l[0], Ledge { left: 300, right: 900, top: 200, title: "Editor".into() });
     }
 
     #[test]
     fn the_desktop_floor_is_always_there_but_always_last() {
         // Otherwise closing every window strands him mid-air.
-        let l = ledges_from(vec![(r(300, 200, 900, 700), "Editor".into())], work());
+        let l = ledges_from(vec![(r(300, 200, 900, 700), "Editor".into())], work(), 0);
         assert_eq!(l.len(), 2);
         assert_eq!(l.last().unwrap().title, "the desktop");
         assert_eq!(l.last().unwrap().top, 1040, "stands on the work area's floor");
 
-        let bare = ledges_from(vec![], work());
+        let bare = ledges_from(vec![], work(), 0);
         assert_eq!(bare.len(), 1, "never stranded: {bare:?}");
+    }
+
+    #[test]
+    fn a_ledge_too_near_the_top_has_no_room_for_him() {
+        // Standing on a title bar 200px down when he is 386 tall puts his head
+        // 186px above the screen. Observed exactly that on Task Manager.
+        let high = vec![(r(300, 200, 900, 700), "Task Manager".into())];
+        assert_eq!(ledges_from(high.clone(), work(), 386).len(), 1, "only the desktop");
+        // The same window is fine for someone short enough to fit.
+        assert_eq!(ledges_from(high, work(), 100).len(), 2);
     }
 
     #[test]
@@ -235,6 +255,7 @@ mod tests {
                 (r(300, 300, 900, 340), "short".into()),
             ],
             work(),
+            0,
         );
         assert_eq!(l.len(), 1, "only the desktop survives: {l:?}");
     }
@@ -243,26 +264,26 @@ mod tests {
     fn a_maximised_window_has_no_edge_to_sit_on() {
         // Its top is flush with the screen, so there is no shelf — and putting
         // him there would pin him to the very top of the display.
-        let l = ledges_from(vec![(r(0, 0, 1920, 1040), "Maximised".into())], work());
+        let l = ledges_from(vec![(r(0, 0, 1920, 1040), "Maximised".into())], work(), 0);
         assert_eq!(l.len(), 1, "{l:?}");
     }
 
     #[test]
     fn an_edge_below_the_work_area_is_off_screen() {
-        let l = ledges_from(vec![(r(300, 1200, 900, 1500), "Below".into())], work());
+        let l = ledges_from(vec![(r(300, 1200, 900, 1500), "Below".into())], work(), 0);
         assert_eq!(l.len(), 1, "{l:?}");
     }
 
     #[test]
     fn a_half_off_screen_window_is_clipped_to_what_is_visible() {
-        let l = ledges_from(vec![(r(-400, 200, 700, 700), "Hanging off".into())], work());
+        let l = ledges_from(vec![(r(-400, 200, 700, 700), "Hanging off".into())], work(), 0);
         assert_eq!(l[0].left, 0, "cannot walk off the left of the screen");
         assert_eq!(l[0].right, 700);
     }
 
     #[test]
     fn clipping_can_leave_too_little_to_stand_on() {
-        let l = ledges_from(vec![(r(-900, 200, 100, 700), "Mostly gone".into())], work());
+        let l = ledges_from(vec![(r(-900, 200, 100, 700), "Mostly gone".into())], work(), 0);
         assert_eq!(l.len(), 1, "{l:?}");
     }
 

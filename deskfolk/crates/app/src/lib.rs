@@ -722,20 +722,24 @@ fn wander_tick(
     let (w, _) = companion.size();
     match walk.tick(dt, gait, free) {
         stroll::Step::Stay => {}
-        stroll::Step::Move { x, y } => {
+        stroll::Step::Move { x, y, facing } => {
             companion.move_to(x, y);
             // Hold the walk cycle while he is moving, re-asserted rather than
             // set once: a clip with a hold would otherwise lapse back to idle
-            // part-way across the screen. Hopping has no clip to hold.
-            if let Some(e) = gait.emotion() {
-                if roll % 30 == 0 {
-                    let _ = rt.lock().engine.play_emotion(e, 0, 0);
+            // part-way across the screen. Re-asserting also flips him the
+            // instant the direction changes. Hopping has no clip to hold.
+            if let Some(e) = gait.emotion(facing) {
+                if roll % 20 == 0 {
+                    let played = !rt.lock().engine.play_emotion(e, 0, 0).is_empty();
+                    tracing::debug!("wander: holding {e:?} (resolved: {played})");
                 }
             }
         }
         stroll::Step::Arrived { on } => {
             tracing::debug!("wander: settled on {on:?}");
             journal::did(format!("moved to sit on {on:?}"));
+            // Back to his own idle rather than freezing on the last stride.
+            let _ = rt.lock().engine.play_emotion("idle", 0, 0);
             walk.rest(on, rest_for(roll));
             return;
         }

@@ -12,19 +12,21 @@
 //!
 //! ## On the walk cycle
 //!
-//! There is no walk animation in the package — every sprite is a seated or
-//! standing pose — so crossing the screen is done as a series of hops: he keeps
-//! whatever pose he is in and travels in an arc, which reads as deliberate
-//! movement where sliding a static sprite would not.
+//! [`Gait`] takes whichever the package provides. With a `walk` clip he walks;
+//! without one he hops, keeping whatever pose he is in and travelling in an
+//! arc, because sliding a static sprite flat across the screen reads as a bug
+//! where an arc reads as intent.
 //!
-//! Playing the package's `jump` clip for that was tried and is wrong. Its
+//! Playing the package's `jump` clip for the hop was tried and is wrong. Its
 //! frames are the `img_y_big*` set, drawn at a visibly larger scale than the
 //! seated idle — sitting shows him in a beanbag, so the person occupies much
-//! less of the canvas — and he ballooned every time he moved. The arc alone
-//! does the job and keeps him one size.
+//! less of the canvas — and he ballooned every time he moved.
 //!
-//! [`Gait`] picks whichever the package actually has, so adding a `walk` clip
-//! later switches him to walking and changes nothing else.
+//! Walking needs two clips, not one: the renderer draws a sprite as it is and
+//! cannot mirror at draw time, so `walk_right` is a second, pre-flipped set of
+//! frames. Facing therefore has to come out of the state machine rather than
+//! being inferred by the caller, which is what [`Facing`] on [`Step::Move`] is
+//! for.
 
 use std::time::Duration;
 
@@ -57,15 +59,25 @@ pub enum Gait {
     Hop,
 }
 
+/// Which way he is travelling, and therefore which way he should face.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Facing {
+    Left,
+    Right,
+}
+
 impl Gait {
     /// The looping clip to hold while moving, if the package has one.
     ///
-    /// `None` means "keep the pose you are in" — correct for hopping, where
-    /// every candidate clip is the wrong scale.
-    pub fn emotion(self) -> Option<&'static str> {
-        match self {
-            Gait::Walk => Some("walk"),
-            Gait::Hop => None,
+    /// Two clips rather than one because the renderer draws a sprite as it is
+    /// and cannot flip at draw time, so the mirrored cycle is a second set of
+    /// frames. `None` means "keep the pose you are in" — correct for hopping,
+    /// where every candidate clip is the wrong scale.
+    pub fn emotion(self, facing: Facing) -> Option<&'static str> {
+        match (self, facing) {
+            (Gait::Walk, Facing::Left) => Some("walk"),
+            (Gait::Walk, Facing::Right) => Some("walk_right"),
+            (Gait::Hop, _) => None,
         }
     }
 
@@ -116,7 +128,7 @@ pub enum Step {
     Stay,
     /// Put him here. `y` already includes the arc, so the caller does not
     /// need to know anything about gaits.
-    Move { x: i32, y: i32 },
+    Move { x: i32, y: i32, facing: Facing },
     /// He got where he was going.
     Arrived { on: String },
 }
@@ -164,16 +176,18 @@ impl Stroll {
                 // would land him past the target and walking back.
                 let leg = stride.min(remaining.abs()) * remaining.signum();
                 let t = (*phase_ms as f32 / per_step as f32).clamp(0.0, 1.0);
+                let facing = if remaining < 0 { Facing::Left } else { Facing::Right };
 
                 if *phase_ms >= per_step {
                     // Step done: he is on the ground at its far end.
                     *from_x += leg;
                     *phase_ms -= per_step;
-                    return Step::Move { x: *from_x, y: *y };
+                    return Step::Move { x: *from_x, y: *y, facing };
                 }
                 Step::Move {
                     x: *from_x + (leg as f32 * t).round() as i32,
                     y: *y - gait.arc(t),
+                    facing,
                 }
             }
         }
@@ -299,6 +313,30 @@ mod tests {
     }
 
     #[test]
+    fn he_faces_the_way_he_is_going() {
+        // The cycle as drawn faces left, so walking right needs the mirrored
+        // clip. Getting this backwards makes him moonwalk everywhere.
+        let mut right = walking(900, 10, 100);
+        assert!(matches!(right.tick(16, Gait::Walk, true),
+                         Step::Move { facing: Facing::Right, .. }));
+        let mut left = Stroll::Walking {
+            to: "L".into(), target_x: 0, y: 10, from_x: 900, phase_ms: 0,
+        };
+        assert!(matches!(left.tick(16, Gait::Walk, true),
+                         Step::Move { facing: Facing::Left, .. }));
+    }
+
+    #[test]
+    fn facing_picks_the_mirrored_clip_not_the_same_one() {
+        // Both directions resolving to one clip is the failure that looks
+        // like he is sliding backwards half the time.
+        assert_ne!(
+            Gait::Walk.emotion(Facing::Left),
+            Gait::Walk.emotion(Facing::Right)
+        );
+    }
+
+    #[test]
     fn he_walks_left_as_readily_as_right() {
         let mut s = Stroll::Walking {
             to: "L".into(), target_x: 0, y: 10, from_x: 500, phase_ms: 0,
@@ -347,8 +385,10 @@ mod tests {
         // The regression: hopping played the package's `jump` clip, whose
         // frames are the `img_y_big*` set — drawn much larger than the seated
         // idle, so he ballooned every time he moved.
-        assert_eq!(Gait::Hop.emotion(), None, "keeps whatever pose he is in");
-        assert_eq!(Gait::Walk.emotion(), Some("walk"));
+        assert_eq!(Gait::Hop.emotion(Facing::Left), None, "keeps whatever pose he is in");
+        assert_eq!(Gait::Hop.emotion(Facing::Right), None);
+        assert_eq!(Gait::Walk.emotion(Facing::Left), Some("walk"));
+        assert_eq!(Gait::Walk.emotion(Facing::Right), Some("walk_right"));
         assert_eq!(Gait::of(true), Gait::Walk);
         assert_eq!(Gait::of(false), Gait::Hop);
         // Hops are rarer and longer, so both gaits cross at a similar pace.
