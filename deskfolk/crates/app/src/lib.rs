@@ -27,6 +27,7 @@ use tauri::{
 mod audio;
 mod config;
 mod ear;
+mod journal;
 mod mind;
 mod paths;
 mod runtime;
@@ -105,6 +106,7 @@ impl deskfolk_render_win::Host for CompanionHost {
                 MenuEntry::item("sleep", "Send him to sleep").with_icon(Icon::Sleep)
             },
             MenuEntry::item("center", "Control Center").with_icon(Icon::Panel),
+            MenuEntry::item("journal", "Today's log").with_icon(Icon::Panel),
             MenuEntry::Separator,
             MenuEntry::item("quit", "Quit Deskfolk").with_icon(Icon::Quit),
         ]
@@ -261,8 +263,80 @@ pub fn run() {
             install_tray(&handle)?;
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("failed to launch Deskfolk");
+        .build(tauri::generate_context!())
+        .expect("failed to launch Deskfolk")
+        .run(|_app, event| {
+            // Seal the journal however the session ends, not only via the menu
+            // item — closing from the tray, a shutdown, or anything else that
+            // unwinds cleanly should still leave the day summarised. `finish`
+            // only writes once, so the menu path calling it first is fine.
+            if matches!(event, tauri::RunEvent::Exit) {
+                journal::finish();
+            }
+        });
+}
+
+/// What is running, for the journal's session header.
+///
+/// A transcript is worth much less without it: "he sounded flat today" is only
+/// actionable next to which model, voice and register produced it.
+///
+/// With a sidecar the app genuinely does not know — the brain owns the mind,
+/// the voice and the ears — so it has to ask. The probe runs on its own thread
+/// because `reqwest::blocking` may not be called from inside the async
+/// runtime, and a brain that does not answer quickly just leaves those lines
+/// out rather than holding up his appearing on screen.
+fn describe_stack(
+    provider: &deskfolk_ai::ProviderConfig,
+    pkg: &CharacterPackage,
+    devices: &audio::DeviceList,
+) -> Vec<(String, String)> {
+    let mut stack = vec![
+        ("Package".into(), format!("{} v{}", pkg.manifest.name, pkg.manifest.version)),
+        ("Mind".into(), provider.describe()),
+    ];
+    if let deskfolk_ai::ProviderConfig::Sidecar { base_url } = provider {
+        if let Some(h) = brain_health(base_url) {
+            let get = |a: &str, b: &str| -> Option<String> {
+                h.get(a)?.get(b)?.as_str().map(str::to_string)
+            };
+            if let Some(m) = h.get("model").and_then(|v| v.as_str()) {
+                stack.push(("Model".into(), m.to_string()));
+            }
+            if let (Some(m), Some(v)) = (get("tts", "model"), get("tts", "voice")) {
+                stack.push(("Voice".into(), format!("{m}, voice {v}")));
+            }
+            if let Some(m) = get("stt", "model") {
+                stack.push(("Ears".into(), m));
+            }
+            if let Some(r) = h.get("register") {
+                stack.push(("Register".into(), r.to_string()));
+            }
+        }
+    }
+    stack.push((
+        "Mic".into(),
+        devices.selected_input.clone().unwrap_or_else(|| "system default".into()),
+    ));
+    stack
+}
+
+fn brain_health(base_url: &str) -> Option<serde_json::Value> {
+    let url = format!("{}/health", base_url.trim_end_matches('/'));
+    std::thread::spawn(move || {
+        reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_millis(1500))
+            .build()
+            .ok()?
+            .get(&url)
+            .send()
+            .ok()?
+            .json::<serde_json::Value>()
+            .ok()
+    })
+    .join()
+    .ok()
+    .flatten()
 }
 
 fn boot_companion(app: &AppHandle) -> anyhow::Result<()> {
@@ -317,6 +391,15 @@ fn boot_companion(app: &AppHandle) -> anyhow::Result<()> {
         tracing::info!("voice: off — he will speak in subtitles only");
     }
 
+    // Today's journal. Started here rather than at the first reply so that a
+    // session which crashes before he says anything still leaves a record of
+    // what was running when it did.
+    let stack = describe_stack(&provider_config, &pkg, &devices);
+    match journal::start(&paths::companion_data_dir(app, &id).join("journal"), &id, stack) {
+        Some(p) => tracing::info!("journal: today's log is {}", p.display()),
+        None => tracing::warn!("journal: could not be started; today will go unrecorded"),
+    }
+
     let rt = Arc::new(Mutex::new(rt));
 
     // What to do when he has actually heard something: remember the exchange,
@@ -328,6 +411,19 @@ fn boot_companion(app: &AppHandle) -> anyhow::Result<()> {
             tracing::info!("he replied to speech: {:?} ({})", h.say, h.emotion);
             mind::remember_exchange(&mind, &h.heard, &h.say);
             let has_audio = voice.speak(&h.say);
+            // Spoken turns never pass through `mind::ask` — the ear talks to
+            // the brain itself — so this is the only place they can be
+            // journalled, and they are the most interesting entries there are.
+            journal::said(journal::Said {
+                event: "user_speech".into(),
+                heard: h.heard.clone(),
+                say: h.say.clone(),
+                emotion: h.emotion.clone(),
+                glitch: h.glitch,
+                action: h.action.clone(),
+                spoken: has_audio,
+                ..Default::default()
+            });
             let mut guard = rt.lock();
             guard.engine.settle();
             guard.inputs.voice_pending = has_audio;
@@ -568,8 +664,23 @@ fn on_menu(app: &AppHandle, id: &str) {
     }
 
     match id {
-        "quit" => app.exit(0),
+        "quit" => {
+            // Seal the day's journal before the process goes. Everything up to
+            // here is already on disk; this is what adds the summary.
+            journal::finish();
+            app.exit(0)
+        }
         "center" => open_control_center(app),
+        // Opening it mid-session is useful precisely because the file is
+        // written as it happens: what he just said is already in there.
+        "journal" => match journal::path() {
+            Some(p) => {
+                if let Err(e) = tauri_plugin_opener::open_path(&p, None::<&str>) {
+                    tracing::warn!("journal: could not open {}: {e}", p.display());
+                }
+            }
+            None => tracing::warn!("journal: nothing to open — none was started"),
+        },
         "wake_word" => {
             if let Some(state) = app.try_state::<AppState>() {
                 let on = {
@@ -591,11 +702,13 @@ fn on_menu(app: &AppHandle, id: &str) {
                 state.voice.stop();
                 state.ear.cancel();
                 state.rt.lock().engine.sleep();
+                journal::did("sent to sleep");
             }
         }
         "wake" => {
             if let Some(state) = app.try_state::<AppState>() {
                 let _ = state.rt.lock().engine.wake_up();
+                journal::did("woken up");
             }
         }
         "talk" => {

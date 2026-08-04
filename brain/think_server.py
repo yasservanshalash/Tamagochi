@@ -682,7 +682,33 @@ def _similar(a: str, b: str) -> float:
 
 @app.get("/health")
 def health():
-    return {"ok": True, "model": MODEL, "base": API_BASE}
+    """What is actually running right now.
+
+    A session writes this into its journal on quit, so that a day's transcript
+    can be read against the stack that produced it — a change in his voice is
+    not worth much without knowing which model and register were behind it.
+
+    Names and settings only. Keys never appear here, and neither do the URLs
+    that carry them as query parameters.
+    """
+    return {
+        "ok": True,
+        "model": MODEL,
+        "base": API_BASE,
+        "tts": {
+            "model": GROQ_TTS_MODEL,
+            "voice": GROQ_TTS_VOICE,
+            "format": TTS_FORMAT,
+            "fallback": TTS_FALLBACK_MODE,
+        },
+        "stt": {"model": GROQ_MODEL, "cloud": bool(STT_CLOUD_URL)},
+        "register": {
+            "keep_it_real": PET_KEEP_IT_REAL,
+            "spice": os.environ.get("PET_SPICE") == "1",
+            "say_limit": SAY_LIMIT,
+            "max_tokens": MAX_TOKENS,
+        },
+    }
 
 @app.get("/pet/memory")
 def get_memory():

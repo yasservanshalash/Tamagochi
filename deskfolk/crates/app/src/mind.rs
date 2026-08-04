@@ -11,6 +11,7 @@ use deskfolk_ai::{Provider, ProviderConfig, Role, ThinkRequest, ThinkReply, Turn
 use deskfolk_engine::Reply;
 use parking_lot::Mutex;
 
+use crate::journal;
 use crate::runtime::Runtime;
 use crate::voice::Voice;
 
@@ -133,7 +134,9 @@ pub fn ask(
     }
 
     tauri::async_runtime::spawn(async move {
+        let asked_at = std::time::Instant::now();
         let outcome = mind.provider.think(&request).await;
+        let took = asked_at.elapsed();
         mind.busy.store(false, Ordering::SeqCst);
 
         match outcome {
@@ -149,6 +152,16 @@ pub fn ask(
                 } else {
                     false
                 };
+                journal::said(journal::Said {
+                    event: event.clone(),
+                    heard: text.clone(),
+                    say: reply.say.clone(),
+                    emotion: reply.emotion.clone(),
+                    glitch: reply.glitch,
+                    action: reply.action.clone(),
+                    spoken: has_audio,
+                    took,
+                });
                 let mut guard = rt.lock();
                 guard.inputs.busy = false;
                 guard.inputs.voice_pending = has_audio;
@@ -156,6 +169,7 @@ pub fn ask(
             }
             Err(e) => {
                 tracing::warn!("mind unreachable: {e}");
+                journal::trouble(format!("mind unreachable on '{event}': {e}"));
                 let mut guard = rt.lock();
                 guard.inputs.busy = false;
                 let line = offline_line(&guard);

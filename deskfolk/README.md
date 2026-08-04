@@ -367,6 +367,41 @@ mic: turn ended — 1.6s, peak 37 (floor 2)
 The rest, all in `ear.rs`: speech must hold for 110ms, a turn ends after 1s of
 silence, and it gives up after 4s of nothing or 25s of anything.
 
+## His journal
+
+Every day he keeps one, at
+
+```
+%APPDATA%\com.deskfolk.desktop\companions\<character>\journal\deskfolk-YYYY-MM-DD.md
+```
+
+**Today's log** in his menu opens it. It is Markdown, written to be handed
+straight to a model at the end of a day and turned into a better character.
+
+Each session opens with the stack that produced it — package, mind, model,
+voice, ears, register, microphone — because "he sounded flat today" is only
+actionable next to *which* model and register were behind it. With a sidecar
+the app does not know any of that itself, so it asks the brain's `/health`.
+Then every reply, with what prompted it, what he was told, what he said, the
+emotion and glitch level, whether it reached the speakers or stayed a
+subtitle, and how long the mind took. Then a summary: replies, what prompted
+them, the emotion spread, how often he tripped, median time to answer.
+
+Three things about how it is written, in `journal.rs`:
+
+- **One file per day, sessions appended.** "What was he like today" does not
+  respect process boundaries; a restart at lunchtime should not split the day.
+- **Written as it happens.** Quitting *seals* the summary, but a journal that
+  only existed on a clean exit would lose the sessions most worth reading. It
+  is also readable while he is still running, which is why the file is
+  reopened per entry rather than held.
+- **Sealed on any clean exit**, not just the menu item — the tray, a shutdown,
+  anything that unwinds. `finish` writes once, so both paths calling it is fine.
+
+The summary is the part that pays for itself. A trip rate of 25% against a
+brief asking for one in eight, or a median answer of 7s, is the kind of thing
+that is invisible while you are talking to him and obvious in a tally.
+
 ## Which models to use
 
 [`MODEL-CHOICES.md`](MODEL-CHOICES.md) compares the speech-to-text, language
