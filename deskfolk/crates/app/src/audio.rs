@@ -30,11 +30,17 @@ pub struct AudioSettings {
     pub output: Option<String>,
     #[serde(default)]
     pub input: Option<String>,
-    /// Listen for his name continuously. Off by default and deliberately so:
-    /// it holds the microphone open for as long as he is awake, which is not
-    /// something to switch on without being asked.
-    #[serde(default)]
+    /// Listen for his name continuously. On by default now — he is meant to be
+    /// always listening, and it costs nothing to run: the mic is captured
+    /// locally and name-spotting is a local whisper. Cloud transcription only
+    /// happens once you are actually talking *to* him. `DESKFOLK_WAKE=off`
+    /// turns it off for anyone who wants the mic closed until they click him.
+    #[serde(default = "wake_default")]
     pub wake: bool,
+}
+
+fn wake_default() -> bool {
+    std::env::var("DESKFOLK_WAKE").as_deref() != Ok("off")
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -427,12 +433,18 @@ mod tests {
     }
 
     #[test]
-    fn an_older_settings_file_does_not_switch_the_microphone_on() {
-        // Anyone upgrading has a file with no `wake` key at all. Defaulting
-        // that to true would silently start holding their mic open.
+    fn a_file_without_the_wake_key_defaults_to_listening() {
+        // He is meant to be always listening, and it costs nothing — local
+        // capture, local name-spotting, cloud only once addressed. A file
+        // predating the key (or a fresh install) opts in. DESKFOLK_WAKE=off is
+        // the way out; env is process-wide, so this test only asserts the
+        // key-absent default, not the override.
         let s: AudioSettings =
             serde_json::from_str(r#"{"output":"Speakers","input":"Mic"}"#).unwrap();
-        assert!(!s.wake, "name-spotting must be opt-in, always");
+        assert!(
+            s.wake || std::env::var("DESKFOLK_WAKE").as_deref() == Ok("off"),
+            "always-listen is the default unless explicitly turned off"
+        );
     }
 
     #[test]

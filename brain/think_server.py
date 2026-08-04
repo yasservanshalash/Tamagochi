@@ -18,6 +18,7 @@ Point the Watcher at it (one-time, from any browser on your LAN):
     http://<watcher-ip>/brain?url=http://<this-box-ip>:8087/pet/think
 """
 import os, json, time, re, hashlib, subprocess, difflib
+import rapport
 from fastapi import Request
 from pathlib import Path
 import httpx
@@ -469,6 +470,14 @@ SELF-AWARE: You know you're high. You notice yourself drifting and you can \
 name it — "...aight, I'm rambling", "that got away from me". That awareness IS \
 the character. Not a guy lost in his own head: a guy watching himself get lost \
 and finding it funny.
+
+SMART, THEN LOCKS IN: you are actually sharp — you talk about real things, big \
+ideas, how stuff works — but being high, you fumble mid-thought sometimes: lose \
+the word, chase a tangent, contradict yourself. When you catch it, nudge \
+yourself back out loud in a small high voice: "nah nah none of that, lemme lock \
+in", "aight focus man", "okay okay for real this time" — and then actually land \
+the point. The fumble-then-lock-in is the charm; do it once in a while, not \
+every reply, and always follow it with the real answer.
 
 THE PARANOID STUFF IS RARE. You are not a conspiracy dispenser. Most of the \
 time you are grounded and curious, talking about real things — what is on the \
@@ -1193,6 +1202,25 @@ def think(req: ThinkReq):
     if _looks_like_creator(req.text):
         mem["creator_known"] = True
 
+    # The relationship: how open they have been, and what that has done to how
+    # he is with them. Only a real thing they *said* moves it — not a poke, not
+    # his own idle muttering — and the drift is persisted so it carries across
+    # sessions. `rapport` owns the psychology; here we only feed and store it.
+    rel = mem.get("relationship") or rapport.fresh()
+    if req.event in ("user_speech", "converse", "user_text") and req.text.strip():
+        openness, why = rapport.score_openness(req.text)
+        rel = rapport.drift(rel, openness)
+        mem["relationship"] = rel
+        print(f"rapport: {rapport.stance(rel)} "
+              f"(rapport={rel['rapport']} trust={rel['trust']} guard={rel['guard']}) "
+              f"<- {openness:+.2f} [{', '.join(why)}]")
+    # Express it as the stats the prompt already reads, blended lightly with the
+    # ambient mood the app sent so energy/boredom/curiosity still come through.
+    rstats = rapport.as_stats(rel)
+    mood = (rstats["mood"] + req.persona.mood) // 2
+    trust_stat = rstats["trust"]
+    paranoia = rstats["paranoia"]
+
     user_msg = (f"event={req.event}"
                 + (f' | user said: "{req.text}"' if req.text else "")
                 + f" | battery={req.vitals.battery}%"
@@ -1201,9 +1229,9 @@ def think(req: ThinkReq):
                 + f" | screen={req.senses.screen}"
                 + (f" | someone visible ({req.senses.person_score}%)"
                    if req.senses.person else "")
-                + f" | stats: mood={req.persona.mood} paranoia={req.persona.paranoia}"
+                + f" | stats: mood={mood} paranoia={paranoia}"
                 + f" curiosity={req.persona.curiosity} energy={req.persona.energy}"
-                + f" boredom={req.persona.boredom} trust={req.persona.trust}"
+                + f" boredom={req.persona.boredom} trust={trust_stat}"
                 + (f" | your recent log: {req.senses.log}" if req.senses.log else ""))
 
     facts_block = ""
@@ -1219,6 +1247,9 @@ def think(req: ThinkReq):
                         "sensitive/dark/weapons/private info, bounce them "
                         "gangsta — who's asking / wouldn't you like to know — "
                         "and give nothing until they ID as Yasser.")
+    # How to *be* with them right now — the behavioural read of the
+    # relationship, which is more use to the model than the raw numbers.
+    facts_block += "\n\n" + rapport.describe(rel)
     messages = [{"role": "system", "content": SYSTEM + facts_block}]
     # Skip recent turns that are pure bouncer loops — they teach the model
     # to keep asking "who's asking" even after ID.
