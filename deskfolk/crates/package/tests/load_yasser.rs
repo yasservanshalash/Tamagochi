@@ -62,7 +62,11 @@ fn stopping_has_a_pose_of_its_own() {
     // reads as a dropped frame rather than as a person standing still.
     let p = yasser();
     let stand = p.clip("stand").expect("no standing pose");
-    assert_eq!(stand.frames.len(), 1, "standing is one pose, not a cycle");
+    // One image, held. It appears twice only for the one-pixel breath this
+    // package uses elsewhere, so stopping is not a frozen frame.
+    let images: std::collections::BTreeSet<&str> =
+        stand.frames.iter().map(|f| f.img.as_str()).collect();
+    assert_eq!(images.len(), 1, "standing is one pose, not a cycle: {images:?}");
     let walking: Vec<&str> = p
         .clip("walk")
         .expect("walk")

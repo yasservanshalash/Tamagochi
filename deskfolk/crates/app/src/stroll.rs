@@ -228,6 +228,37 @@ impl Stroll {
     }
 }
 
+/// Somewhere on `ledge` worth walking to, given he is at `from`.
+///
+/// Clamping his current position into the ledge — the obvious thing, and what
+/// this replaced — lands him exactly where he already stands whenever the
+/// ledge is wide enough to contain him. The desktop floor always is. He set
+/// off and arrived in the same frame, so he almost never walked, and when he
+/// did the direction was whatever the one reachable ledge happened to be.
+///
+/// So: vary the spot along the ledge, and if the roll lands near where he is,
+/// head for the far end instead. A journey shorter than his own width is not
+/// a journey.
+pub fn spot_on(ledge: &deskfolk_render_win::ledges::Ledge, from: i32, half_w: i32,
+               roll: u32) -> i32 {
+    let (lo, hi) = (ledge.left + half_w, ledge.right - half_w);
+    if lo >= hi {
+        // Narrower than he is: centre him and let him overhang evenly.
+        return (ledge.left + ledge.right) / 2;
+    }
+    let span = hi - lo;
+    // Hashed, not used directly: `roll` is a frame counter, so `roll % span`
+    // makes the target a near-linear function of it — a small counter lands
+    // near the left end every time, and he only ever walked one way.
+    let scattered = roll.wrapping_mul(2_654_435_761) >> 8;
+    let mut target = lo + (scattered % span as u32) as i32;
+    let min_trip = (half_w * 2).max(120);
+    if (target - from).abs() < min_trip {
+        target = if from - lo > hi - from { lo } else { hi };
+    }
+    target
+}
+
 /// Choose somewhere to go, given where he is and what is on screen.
 ///
 /// Returns `None` when he is already somewhere sensible — moving for the sake
@@ -251,12 +282,11 @@ pub fn pick<'a>(
     // interesting place to be, and `scan` already returns front to back.
     let near_front = choices.len().min(3);
     let idx = (roll as usize) % near_front.max(1);
-    let chosen = choices[idx];
-    // Not worth crossing the screen for a few pixels.
-    if (chosen.left..=chosen.right).contains(&x) && chosen.title == resting_on {
-        return None;
-    }
-    Some(chosen)
+    // Staying on the same ledge is still a journey — `spot_on` guarantees he
+    // goes somewhere else along it. Refusing that was what left him standing
+    // in one place all session whenever only the desktop was available.
+    let _ = x;
+    Some(choices[idx])
 }
 
 #[cfg(test)]
@@ -438,9 +468,48 @@ mod tests {
     }
 
     #[test]
-    fn with_nowhere_else_he_stays_put_rather_than_pacing() {
+    fn one_ledge_is_still_somewhere_to_walk() {
+        // He used to refuse this, and the desktop floor is often the only
+        // ledge — so he stood in one spot for a whole session.
         let ls = vec![ledge("the desktop", 0, 1920, 1040)];
-        assert!(pick(&ls, 500, "the desktop", 0).is_none(), "no pointless pacing");
+        assert!(pick(&ls, 500, "the desktop", 0).is_some());
+    }
+
+    #[test]
+    fn a_target_is_never_where_he_already_is() {
+        // The regression: clamping his position into a ledge that contains him
+        // returns that same position, so he arrived on the frame he set off.
+        let l = ledge("the desktop", 0, 1920, 1040);
+        for roll in 0..200u32 {
+            for from in [0, 400, 960, 1500, 1919] {
+                let t = spot_on(&l, from, 73, roll);
+                assert!((t - from).abs() >= 120, "{t} is no walk from {from}");
+                assert!(t >= l.left && t <= l.right, "{t} left the ledge");
+            }
+        }
+    }
+
+    #[test]
+    fn he_is_sent_both_ways_over_time() {
+        // Direction follows the target, so a target generator that always
+        // lands on one side means a companion that only ever walks one way.
+        let l = ledge("the desktop", 0, 1920, 1040);
+        let (mut left, mut right) = (0, 0);
+        for roll in 0..200u32 {
+            match spot_on(&l, 960, 73, roll) {
+                t if t < 960 => left += 1,
+                t if t > 960 => right += 1,
+                _ => {}
+            }
+        }
+        assert!(left > 20 && right > 20, "lopsided: {left} left, {right} right");
+    }
+
+    #[test]
+    fn a_ledge_narrower_than_he_is_still_gets_a_target() {
+        let l = ledge("tiny", 300, 400, 200);
+        let t = spot_on(&l, 0, 200, 7);
+        assert_eq!(t, 350, "centred, overhanging evenly");
     }
 
     #[test]

@@ -779,12 +779,13 @@ fn wander_tick(
             // Land his *feet* on the edge. The stage keeps empty canvas below
             // the anchor, so putting the window's bottom there left him
             // hovering above the ledge by that margin.
-            let target_x = l.clamp_x(x + w / 2, w / 2) - w / 2;
+            let target_x = stroll::spot_on(l, x + w / 2, w / 2, roll) - w / 2;
             let target_y = l.top - companion.feet_offset();
             tracing::debug!(
-                "wander: setting off for {:?} — ledge top {}, feet land there with \
-                 his window at y {target_y}",
+                "wander: setting off {} for {:?} — {}px, ledge top {}, window y {target_y}",
+                if target_x < x { "left" } else { "right" },
                 l.title,
+                (target_x - x).abs(),
                 l.top,
             );
             walk.walk_to(l.title.clone(), x, target_x, target_y);

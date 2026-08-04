@@ -818,7 +818,12 @@
       "frames": [
         {
           "img": "img_y_stand",
-          "ms": 1200
+          "ms": 1300
+        },
+        {
+          "img": "img_y_stand",
+          "ms": 1300,
+          "dy": 1
         }
       ],
       "loop": true
