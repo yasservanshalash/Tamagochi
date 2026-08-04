@@ -41,19 +41,40 @@ fn carries_the_whole_alpha_behavior_table() {
     let behaviour = |names: Vec<&String>| -> usize {
         names.iter().filter(|n| !n.starts_with("hd_")).count()
     };
-    // 20 + 19 at the alpha; `walk` and `walk_right` joined the behaviour table
-    // when he stopped hopping and started walking for real.
+    // 20 + 19 at the alpha; `walk`, `walk_right` and `stand` joined the
+    // behaviour table when he stopped hopping and started walking for real.
     assert_eq!(
         behaviour(p.manifest.clips.keys().collect()),
-        22,
+        23,
         "clip count drifted from the alpha"
     );
     assert_eq!(
         behaviour(p.manifest.emotions.keys().collect()),
-        21,
+        22,
         "emotion count drifted from the alpha"
     );
     assert_eq!(p.manifest.visemes.len(), 4);
+}
+
+#[test]
+fn stopping_has_a_pose_of_its_own() {
+    // Without this he freezes on whatever stride he happened to end on, which
+    // reads as a dropped frame rather than as a person standing still.
+    let p = yasser();
+    let stand = p.clip("stand").expect("no standing pose");
+    assert_eq!(stand.frames.len(), 1, "standing is one pose, not a cycle");
+    let walking: Vec<&str> = p
+        .clip("walk")
+        .expect("walk")
+        .frames
+        .iter()
+        .map(|f| f.img.as_str())
+        .collect();
+    assert!(
+        !walking.contains(&stand.frames[0].img.as_str()),
+        "the standing pose is inside the walk cycle, which is what made him \
+         turn to face the viewer once per stride"
+    );
 }
 
 #[test]

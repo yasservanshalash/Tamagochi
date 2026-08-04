@@ -631,6 +631,9 @@ fn companion_loop(
     let gait = stroll::Gait::of(
         rt.lock().engine.package().manifest.clips.contains_key("walk"),
     );
+    // How tall the walk art actually draws him, so his pace can be derived
+    // from it rather than tuned in pixels against one particular display.
+    let walker_h = walker_height(&rt);
     let wander = std::env::var("DESKFOLK_WANDER").as_deref() != Ok("off");
     if wander {
         tracing::info!("wander: on, {gait:?} — he will move between your windows");
@@ -652,7 +655,7 @@ fn companion_loop(
 
         if wander {
             roll = roll.wrapping_add(1);
-            wander_tick(&companion, &rt, &mut walk, gait, dt, roll);
+            wander_tick(&companion, &rt, &mut walk, gait, walker_h, dt, roll);
         }
 
         let hour = local_hour();
@@ -708,6 +711,7 @@ fn wander_tick(
     rt: &Arc<Mutex<Runtime>>,
     walk: &mut stroll::Stroll,
     gait: stroll::Gait,
+    walker_h: u32,
     dt: i64,
     roll: u32,
 ) {
@@ -723,7 +727,10 @@ fn wander_tick(
 
     let (x, _) = companion.position();
     let (w, _) = companion.size();
-    match walk.tick(dt, gait, free) {
+    // His height as drawn, which is what every pace in `stroll` is derived
+    // from: the same walk has to read the same on a 4K panel as on a 1080p one.
+    let height_px = (walker_h as f64 * companion.unit()).round() as i32;
+    match walk.tick(dt, gait, height_px, free) {
         stroll::Step::Stay => {}
         stroll::Step::Move { x, y, facing } => {
             companion.move_to(x, y);
@@ -740,9 +747,10 @@ fn wander_tick(
         }
         stroll::Step::Arrived { on } => {
             tracing::debug!("wander: settled on {on:?}");
-            journal::did(format!("moved to sit on {on:?}"));
-            // Back to his own idle rather than freezing on the last stride.
-            let _ = rt.lock().engine.play_emotion("idle", 0, 0);
+            journal::did(format!("moved to stand on {on:?}"));
+            // The standing pose, not a frozen stride and not his beanbag: he
+            // has just walked somewhere and is on his feet there.
+            let _ = rt.lock().engine.play_emotion("stand", 0, 0);
             walk.rest(on, rest_for(roll));
             return;
         }
@@ -785,6 +793,23 @@ fn wander_tick(
         // re-scanning the whole desktop every frame.
         None => walk.rest(resting_on, rest_for(roll)),
     }
+}
+
+/// How tall he is drawn, in art pixels, taken from the walk art itself.
+///
+/// Asked of the package rather than hardcoded, because it is the number every
+/// pace is derived from and it changes the moment the sprite sheet does. The
+/// stage height is not a substitute — it is the canvas, and he does not fill
+/// it.
+fn walker_height(rt: &Arc<Mutex<Runtime>>) -> u32 {
+    let guard = rt.lock();
+    let pkg = guard.engine.package();
+    pkg.clip("walk")
+        .or_else(|| pkg.clip(pkg.role_clip(deskfolk_package::Role::Idle)))
+        .and_then(|c| c.frames.first())
+        .and_then(|f| guard.masks.get(&f.img))
+        .map(|m| m.height)
+        .unwrap_or(pkg.manifest.stage.anchor_y.max(1) as u32)
 }
 
 /// A rest somewhere between the two bounds, varied so he is not metronomic.

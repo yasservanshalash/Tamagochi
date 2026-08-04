@@ -744,35 +744,43 @@
       "frames": [
         {
           "img": "img_y_walkl0",
-          "ms": 100
+          "ms": 108
         },
         {
           "img": "img_y_walkl1",
-          "ms": 100
+          "ms": 108
         },
         {
           "img": "img_y_walkl2",
-          "ms": 100
+          "ms": 108
         },
         {
           "img": "img_y_walkl3",
-          "ms": 100
+          "ms": 108
         },
         {
           "img": "img_y_walkl4",
-          "ms": 100
+          "ms": 108
         },
         {
           "img": "img_y_walkl5",
-          "ms": 100
+          "ms": 108
         },
         {
           "img": "img_y_walkl6",
-          "ms": 100
+          "ms": 108
         },
         {
           "img": "img_y_walkl7",
-          "ms": 100
+          "ms": 108
+        },
+        {
+          "img": "img_y_walkl8",
+          "ms": 108
+        },
+        {
+          "img": "img_y_walkl9",
+          "ms": 108
         }
       ],
       "loop": true
@@ -781,35 +789,52 @@
       "frames": [
         {
           "img": "img_y_walkr0",
-          "ms": 100
+          "ms": 108
         },
         {
           "img": "img_y_walkr1",
-          "ms": 100
+          "ms": 108
         },
         {
           "img": "img_y_walkr2",
-          "ms": 100
+          "ms": 108
         },
         {
           "img": "img_y_walkr3",
-          "ms": 100
+          "ms": 108
         },
         {
           "img": "img_y_walkr4",
-          "ms": 100
+          "ms": 108
         },
         {
           "img": "img_y_walkr5",
-          "ms": 100
+          "ms": 108
         },
         {
           "img": "img_y_walkr6",
-          "ms": 100
+          "ms": 108
         },
         {
           "img": "img_y_walkr7",
-          "ms": 100
+          "ms": 108
+        },
+        {
+          "img": "img_y_walkr8",
+          "ms": 108
+        },
+        {
+          "img": "img_y_walkr9",
+          "ms": 108
+        }
+      ],
+      "loop": true
+    },
+    "stand": {
+      "frames": [
+        {
+          "img": "img_y_stand",
+          "ms": 1200
         }
       ],
       "loop": true
@@ -1001,6 +1026,11 @@
       "clip": "walk_right",
       "base": true,
       "hold_ms": 900
+    },
+    "stand": {
+      "clip": "stand",
+      "base": true,
+      "hold_ms": 30000
     }
   },
   "visemes": [

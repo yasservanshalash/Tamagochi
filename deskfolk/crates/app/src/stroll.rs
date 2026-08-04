@@ -81,15 +81,32 @@ impl Gait {
         }
     }
 
-    /// How far one step carries him, and how long it takes.
+    /// How far one movement quantum carries him, and how long it takes.
     ///
-    /// A hop covers more ground because it happens less often; both come out
-    /// at a similar crossing speed.
-    pub fn step(self) -> (i32, i64) {
-        match self {
-            Gait::Walk => (14, 80),
-            Gait::Hop => (46, 320),
-        }
+    /// Derived from how tall he is on screen rather than tuned in pixels. A
+    /// fixed pixel speed is wrong in two directions at once: on a dense
+    /// display he is drawn larger and the same pixels-per-second reads as a
+    /// shuffle, and on a coarse one as a sprint. Scaling by his own height
+    /// keeps the *apparent* pace constant, and it is the only version that
+    /// also keeps his feet from sliding, since the animation is a fixed
+    /// number of frames per stride.
+    ///
+    /// At his drawn height of 289px that comes to about 223 px/s, and a walk
+    /// cycle of 7 frames at 155ms covers 242px — two steps of 121px, which is
+    /// a 0.73m stride for a 1.75m person. The art and the movement agree.
+    pub fn step(self, height_px: i32) -> (i32, i64) {
+        let px_per_m = height_px.max(1) as f32 / HUMAN_HEIGHT_M;
+        let per_step: i64 = match self {
+            Gait::Walk => 100,
+            Gait::Hop => 320,
+        };
+        let speed = match self {
+            Gait::Walk => WALK_SPEED_MS,
+            // A hop covers more ground per beat because it happens less often.
+            Gait::Hop => WALK_SPEED_MS * 0.8,
+        };
+        let px = (speed * px_per_m * per_step as f32 / 1000.0).round().max(1.0);
+        (px as i32, per_step)
     }
 
     /// How high the arc peaks mid-step. Walking does not leave the ground.
@@ -113,6 +130,13 @@ impl Gait {
         if has_walk_clip { Gait::Walk } else { Gait::Hop }
     }
 }
+
+/// How tall he would be as a person. Everything about how fast he moves is
+/// derived from this and his height on screen, so it stays right whatever DPI
+/// or scale he happens to be drawn at.
+const HUMAN_HEIGHT_M: f32 = 1.75;
+/// An unhurried walking pace, in metres per second.
+const WALK_SPEED_MS: f32 = 1.35;
 
 /// How long he settles somewhere before thinking about moving again.
 pub const REST_MIN: Duration = Duration::from_secs(45);
@@ -153,7 +177,7 @@ impl Stroll {
     /// `allowed` is false whenever he should not be wandering — asleep,
     /// talking, listening, being dragged. He stops where he is rather than
     /// resetting, so an interrupted walk resumes instead of starting over.
-    pub fn tick(&mut self, dt: i64, gait: Gait, allowed: bool) -> Step {
+    pub fn tick(&mut self, dt: i64, gait: Gait, height_px: i32, allowed: bool) -> Step {
         match self {
             Stroll::Resting { until_ms, .. } => {
                 *until_ms -= dt;
@@ -163,7 +187,7 @@ impl Stroll {
                 if !allowed {
                     return Step::Stay;
                 }
-                let (stride, per_step) = gait.step();
+                let (stride, per_step) = gait.step(height_px);
                 if (*target_x - *from_x).abs() <= ARRIVED_WITHIN {
                     let on = std::mem::take(to);
                     let arrived = Step::Arrived { on: on.clone() };
@@ -240,6 +264,9 @@ mod tests {
     use super::*;
     use deskfolk_render_win::ledges::Ledge;
 
+    /// His drawn height, as the walk sheet provides it.
+    const TEST_H: i32 = 289;
+
     fn ledge(title: &str, left: i32, right: i32, top: i32) -> Ledge {
         Ledge { left, right, top, title: title.into() }
     }
@@ -248,9 +275,9 @@ mod tests {
     fn resting_counts_down_and_then_gets_restless() {
         let mut s = Stroll::new(100);
         assert!(!s.restless());
-        assert_eq!(s.tick(60, Gait::Hop, true), Step::Stay);
+        assert_eq!(s.tick(60, Gait::Hop, TEST_H, true), Step::Stay);
         assert!(!s.restless());
-        s.tick(60, Gait::Hop, true);
+        s.tick(60, Gait::Hop, TEST_H, true);
         assert!(s.restless(), "past its time: {s:?}");
     }
 
@@ -265,7 +292,7 @@ mod tests {
         let mut s = walking(1000, 300, 100);
         let mut seen = Vec::new();
         for _ in 0..6 {
-            if let Step::Move { x, .. } = s.tick(16, Gait::Hop, true) {
+            if let Step::Move { x, .. } = s.tick(16, Gait::Hop, TEST_H, true) {
                 seen.push(x);
             }
         }
@@ -277,10 +304,10 @@ mod tests {
     #[test]
     fn a_hop_leaves_the_ground_and_lands_again() {
         let mut s = walking(1000, 300, 100);
-        let (_, per_step) = Gait::Hop.step();
+        let (_, per_step) = Gait::Hop.step(TEST_H);
         let mut heights = Vec::new();
         for _ in 0..(per_step / 16) {
-            if let Step::Move { y, .. } = s.tick(16, Gait::Hop, true) {
+            if let Step::Move { y, .. } = s.tick(16, Gait::Hop, TEST_H, true) {
                 heights.push(y);
             }
         }
@@ -288,7 +315,7 @@ mod tests {
         assert!(peak < 300, "left the ground: {peak}");
         assert!(300 - peak <= Gait::Hop.lift() as i32, "no higher than the arc");
         // And comes back down by the end of the step.
-        let landed = s.tick(per_step, Gait::Hop, true);
+        let landed = s.tick(per_step, Gait::Hop, TEST_H, true);
         assert!(matches!(landed, Step::Move { y, .. } if y == 300), "{landed:?}");
     }
 
@@ -297,7 +324,7 @@ mod tests {
         assert_eq!(Gait::Walk.arc(0.5), 0, "a walk cycle does not hop");
         let mut s = walking(1000, 300, 100);
         for _ in 0..8 {
-            if let Step::Move { y, .. } = s.tick(16, Gait::Walk, true) {
+            if let Step::Move { y, .. } = s.tick(16, Gait::Walk, TEST_H, true) {
                 assert_eq!(y, 300);
             }
         }
@@ -317,12 +344,12 @@ mod tests {
         // The cycle as drawn faces left, so walking right needs the mirrored
         // clip. Getting this backwards makes him moonwalk everywhere.
         let mut right = walking(900, 10, 100);
-        assert!(matches!(right.tick(16, Gait::Walk, true),
+        assert!(matches!(right.tick(16, Gait::Walk, TEST_H, true),
                          Step::Move { facing: Facing::Right, .. }));
         let mut left = Stroll::Walking {
             to: "L".into(), target_x: 0, y: 10, from_x: 900, phase_ms: 0,
         };
-        assert!(matches!(left.tick(16, Gait::Walk, true),
+        assert!(matches!(left.tick(16, Gait::Walk, TEST_H, true),
                          Step::Move { facing: Facing::Left, .. }));
     }
 
@@ -341,7 +368,7 @@ mod tests {
         let mut s = Stroll::Walking {
             to: "L".into(), target_x: 0, y: 10, from_x: 500, phase_ms: 0,
         };
-        let Step::Move { x, .. } = s.tick(16, Gait::Hop, true) else {
+        let Step::Move { x, .. } = s.tick(16, Gait::Hop, TEST_H, true) else {
             panic!("should move");
         };
         assert!(x < 500, "moved toward the target, not away: {x}");
@@ -351,8 +378,8 @@ mod tests {
     fn the_last_step_never_overshoots() {
         // Otherwise he lands past the target and walks back, forever.
         let mut s = walking(130, 10, 100);
-        let (_, per_step) = Gait::Hop.step();
-        let Step::Move { x, .. } = s.tick(per_step, Gait::Hop, true) else {
+        let (_, per_step) = Gait::Hop.step(TEST_H);
+        let Step::Move { x, .. } = s.tick(per_step, Gait::Hop, TEST_H, true) else {
             panic!("should move");
         };
         assert_eq!(x, 130, "stops exactly on it rather than sailing past");
@@ -361,7 +388,7 @@ mod tests {
     #[test]
     fn arriving_settles_him_and_reports_where() {
         let mut s = walking(100, 10, 90);
-        assert_eq!(s.tick(16, Gait::Hop, true), Step::Arrived { on: "Editor".into() });
+        assert_eq!(s.tick(16, Gait::Hop, TEST_H, true), Step::Arrived { on: "Editor".into() });
         assert!(!s.is_walking());
         assert!(s.restless(), "ready to consider the next place");
     }
@@ -372,12 +399,12 @@ mod tests {
         let mut s = Stroll::Walking {
             to: "E".into(), target_x: 900, y: 10, from_x: 100, phase_ms: 0,
         };
-        assert_eq!(s.tick(16, Gait::Hop, false), Step::Stay);
+        assert_eq!(s.tick(16, Gait::Hop, TEST_H, false), Step::Stay);
         assert!(
             matches!(&s, Stroll::Walking { to, target_x, .. } if to == "E" && *target_x == 900),
             "still going there afterwards: {s:?}"
         );
-        assert!(matches!(s.tick(16, Gait::Hop, true), Step::Move { .. }));
+        assert!(matches!(s.tick(16, Gait::Hop, TEST_H, true), Step::Move { .. }));
     }
 
     #[test]
@@ -392,8 +419,8 @@ mod tests {
         assert_eq!(Gait::of(true), Gait::Walk);
         assert_eq!(Gait::of(false), Gait::Hop);
         // Hops are rarer and longer, so both gaits cross at a similar pace.
-        let (walk_d, walk_t) = Gait::Walk.step();
-        let (hop_d, hop_t) = Gait::Hop.step();
+        let (walk_d, walk_t) = Gait::Walk.step(TEST_H);
+        let (hop_d, hop_t) = Gait::Hop.step(TEST_H);
         assert!(hop_d > walk_d && hop_t > walk_t);
         let walk_speed = walk_d as f64 / walk_t as f64;
         let hop_speed = hop_d as f64 / hop_t as f64;

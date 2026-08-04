@@ -87,8 +87,91 @@ def checker_mask(rgb):
     return (spread <= 14) & (value >= 116) & (value <= 208)
 
 
+def green_mask(rgb):
+    """True on a chroma-key green background.
+
+    Keyed loosely enough to take the fringe with it. Green spill on a brown
+    coat leaves a rim of blended pixels, and a tight key keeps them as a lurid
+    outline — much more obvious against a desktop than any missing pixel.
+    Nothing he wears is remotely green, so there is room to be generous.
+    """
+    a = rgb.astype(int)
+    r, g, b = a[:, :, 0], a[:, :, 1], a[:, :, 2]
+    return (g > 80) & (g - np.maximum(r, b) > 10)
+
+
+def looks_greenscreen(rgb):
+    return green_mask(rgb).mean() > 0.25
+
+
+def despill(rgb, keep):
+    """Pull the green cast out of the pixels the key kept.
+
+    Keying alone is not enough. The pixels just inside his outline are a blend
+    of him and the screen, so they survive the key still tinted, and a lurid
+    rim around the whole character is far more obvious on a desktop than any
+    pixel the key took by mistake. Clamping green to just above the other two
+    channels neutralises the blend without touching colours that are honestly
+    green — of which he has none.
+    """
+    out = rgb.astype(int).copy()
+    r, g, b = out[:, :, 0], out[:, :, 1], out[:, :, 2]
+    other = np.maximum(r, b)
+    tinted = keep & (g - other > 4)
+    out[:, :, 1] = np.where(tinted, np.minimum(g, other + 4), g)
+    return out.astype(np.uint8)
+
+
+def heal_watermark(rgb, keep):
+    """Paint out a generator's watermark where it has landed on the character.
+
+    Gemini stamps a small light glyph in one corner, which on a full-bleed
+    sheet lands *on* the last frame — here, on his trousers. Dropping that
+    frame is the obvious answer and the wrong one: it is a tenth of a walk
+    cycle, and losing it gives him a limp.
+
+    Found as neutral mid-value pixels, which he has none of: his trousers are
+    darker, his headphones lighter, everything else is coloured. Verified as
+    281 pixels on the stamped frame and zero on a clean one before being
+    trusted. Filled from the surrounding pixels a ring at a time, which is
+    invisible against flat trousers.
+
+    Opt-in, because the value window is tuned to this character.
+    """
+    a = rgb.astype(int)
+    value = a.mean(axis=2)
+    spread = a.max(axis=2) - a.min(axis=2)
+    mark = keep & (spread <= 18) & (value > 75) & (value < 190)
+    if not mark.any():
+        return rgb, 0
+    total = int(mark.sum())
+    out = a.copy()
+    todo = mark.copy()
+    for _ in range(24):
+        if not todo.any():
+            break
+        filled = todo.copy()
+        for y, x in zip(*np.where(todo)):
+            vals = []
+            for dy in (-1, 0, 1):
+                for dx in (-1, 0, 1):
+                    ny, nx = y + dy, x + dx
+                    if (0 <= ny < out.shape[0] and 0 <= nx < out.shape[1]
+                            and keep[ny, nx] and not todo[ny, nx]):
+                        vals.append(out[ny, nx])
+            if vals:
+                out[y, x] = np.mean(vals, axis=0).round()
+                filled[y, x] = False
+        if (filled == todo).all():
+            break
+        todo = filled
+    return out.astype(np.uint8), total
+
+
 def background_mask(rgb, tol):
     """True where the pixel is background reachable from the border."""
+    if looks_greenscreen(rgb):
+        return green_mask(rgb)
     if looks_checkered(rgb):
         return checker_mask(rgb)
     h, w, _ = rgb.shape
@@ -163,10 +246,17 @@ def cut_group(fg, y0, y1, x0, x1, want):
     return [(x0 + a, x0 + b) for a, b in found], how
 
 
-def main(sheet, outdir, contact=False, row=None, upscale=UPSCALE, prefix="hd_"):
+def main(sheet, outdir, contact=False, row=None, upscale=UPSCALE, prefix="hd_",
+         heal=False):
     rgb = np.asarray(Image.open(sheet).convert("RGB"))
     fg = ~background_mask(rgb, TOLERANCE)
-    if looks_checkered(rgb):
+    if looks_greenscreen(rgb):
+        print("background: chroma-key green")
+        rgb = despill(rgb, fg)
+    if heal:
+        rgb, n = heal_watermark(rgb, fg)
+        print(f"healed {n} watermark pixels")
+    elif looks_checkered(rgb):
         print("background: painted checkerboard (not real alpha)")
 
     groups = []
@@ -249,7 +339,8 @@ if __name__ == "__main__":
     if len(args) < 2:
         sys.exit(
             "usage: slice_sheet.py <sheet.png> <outdir> [--contact]\n"
-            "       [--row=name:y0:y1:frames] [--upscale=N] [--prefix=hd_]"
+            "       [--row=name:y0:y1:frames] [--upscale=N] [--prefix=hd_]\n"
+            "       [--heal-watermark]"
         )
     spec = _opt("--row")
     row = None
@@ -263,4 +354,5 @@ if __name__ == "__main__":
         row,
         int(_opt("--upscale", UPSCALE)),
         _opt("--prefix", "hd_"),
+        "--heal-watermark" in sys.argv,
     )

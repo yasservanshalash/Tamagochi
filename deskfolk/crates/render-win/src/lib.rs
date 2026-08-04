@@ -177,7 +177,7 @@ impl Companion {
     /// pixel snapping rounds it to a whole number, so a companion configured
     /// at 1.3 is drawn at 1.0 and every size computed from 1.3 is a third too
     /// large.
-    fn unit(&self) -> f64 {
+    pub fn unit(&self) -> f64 {
         self.shared.unit_milli.load(Ordering::Relaxed) as f64 / 1000.0
     }
 
