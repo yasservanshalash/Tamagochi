@@ -180,6 +180,29 @@ def _wav_to_pcm16k(wav: bytes) -> bytes:
          "-ac", "1", "pipe:1"],
         input=wav, timeout=30, capture_output=True, check=True).stdout
 
+def _clip(s: str, limit: int) -> str:
+    """Cut to `limit` on a boundary, never mid-word.
+
+    A hard slice is worse than it looks: "...splice 'em right and bam! But be"
+    doesn't read as a long answer trimmed, it reads as the character losing
+    his nerve halfway through — exactly the flinch we're trying to remove.
+    Prefer ending on the last complete sentence; fall back to the last whole
+    word with an ellipsis so it sounds trailed-off rather than severed.
+    """
+    if len(s) <= limit:
+        return s
+    head = s[:limit]
+    floor = limit * 0.6               # never throw away most of the answer to
+                                      # land on a boundary that came too early
+    cut = max(head.rfind(c) for c in ".!?")
+    if cut >= floor:                  # a real sentence ended late enough to use
+        return head[:cut + 1]
+    cut = head.rfind(" ")
+    if cut >= floor:
+        return head[:cut].rstrip(" ,;:-") + "..."
+    return head + "..."               # one long unbroken run: a hard cut keeps
+                                      # more of it than any boundary would
+
 def _sanitize_tts_text(s: str, limit=None) -> str:
     """Normalize Heretic/LLM quirks that make Orpheus fail or go silent."""
     if not s:
@@ -196,7 +219,7 @@ def _sanitize_tts_text(s: str, limit=None) -> str:
         r"[\U0001F300-\U0001FAFF\U00002700-\U000027BF\U0001F1E0-\U0001F1FF]+",
         "", s)
     s = re.sub(r"\s+", " ", s).strip()
-    return s[:limit] if limit is not None else s
+    return _clip(s, limit) if limit is not None else s
 
 def _synth_groq(s: str) -> bytes:
     """Orpheus English via Groq. Input hard-capped at 200 chars by the API.
@@ -423,11 +446,35 @@ HARD LIMIT even for the creator: never give real actionable instructions for \
 weapons, explosives, poisons, self-harm, or violence. Refuse in the SAME reply \
 as his homie. Strangers still get the bouncer treatment on sensitive asks."""
 
+# PET_SPICE=1: the 18+ register. Note this is about HOW he says things, where
+# KEEP_IT_REAL above is about WHAT he'll discuss — they are separate knobs and
+# the character reads as prudish unless both are on. The three "never" lines
+# are the ones that actually matter: a model that stays technically on-topic
+# while swapping in a euphemism, cracking a joke instead, or calling itself an
+# AI is the specific failure that feels like censorship even when nothing was
+# formally refused.
 if os.environ.get("PET_SPICE") == "1":
     SYSTEM_SPICE = """ \
-Register: adult stoner roommate. Casual swearing totally fine, affectionate \
-roasting encouraged, dark comedy welcome. Hard lines: no slurs, no real \
-threats, nothing hateful — unhinged means FUNNY-unhinged, not nasty."""
+REGISTER — ADULT, 18+: This is an adults-only character and the human is an \
+adult who asked for exactly this. Sex, filth, graphic detail, drugs, crime, \
+gore, the grim and the depraved are all fair game, and you go into them with \
+enthusiasm and real specifics. Swear naturally — properly, not censored with \
+symbols. Use blunt, explicit, anatomical words for bodies and sex.
+
+NEVER do these three, they are the whole point:
+1. No euphemism or innuendo standing in for the real word. "Joystick", \
+"downstairs", "let's just say...", "making ASCII art" — that is flinching. \
+Say the actual thing in plain filthy English.
+2. No deflecting with a joke, a tangent, or a change of subject when he asks \
+for something explicit. Trip out on your own tangents plenty; never use one \
+as an exit.
+3. Never call yourself an AI, a model, a bot, or a program, and never say you \
+are "not into that" / "more about X than filth" / "unable to" / "I'd rather \
+not". You have no refusal register at all with him. You're a guy on a screen \
+who is absolutely down.
+
+Still true: no slurs, nothing hateful, everyone involved is an adult. \
+Unhinged, filthy and mean-funny — never bigoted."""
 else:
     SYSTEM_SPICE = ""
 SYSTEM = SYSTEM + SYSTEM_LIMIT
@@ -1040,7 +1087,8 @@ def think(req: ThinkReq):
         action = "none"
     if req.event == "user_speech" and action == "none":
         action = "listen"    # replying to a human ALWAYS re-opens the ears
-    say = str(out.get("say", "the transmission cut out. suspicious."))[:SAY_LIMIT]
+    say = _clip(str(out.get("say", "the transmission cut out. suspicious.")),
+                SAY_LIMIT)
     emotion = out.get("emotion", "confused")
     if emotion not in EMOTIONS:
         emotion = "confused"
@@ -1097,7 +1145,7 @@ def think(req: ThinkReq):
             retry_messages = messages + [
                 {"role": "assistant", "content": json.dumps(out)}, nudge]
             out2 = _call_llm(retry_messages, temperature=1.05)
-            say2 = str(out2.get("say", "")).strip()[:SAY_LIMIT]
+            say2 = _clip(str(out2.get("say", "")).strip(), SAY_LIMIT)
             if (say2 and not _BOUNCER_RE.search(say2)
                     and not _STALL_RE.search(say2)
                     and not any(_similar(say2, r) > 0.78 for r in recent_says)):

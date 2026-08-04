@@ -192,6 +192,49 @@ This is an adult (18+) fiction character, so the model has to stay in character
 on crude material without moralising. That rules out most instruct models, and
 it turned out to rule out the first recommendation on this page.
 
+### First: it is probably not the model
+
+When the character came back feeling censored, the obvious move was to swap in
+a more uncensored model. That would have been the wrong fix, and it is worth
+recording why.
+
+`think_server.py` has **two independent switches**, and the character reads as
+prudish unless *both* are on:
+
+| Flag | Controls |
+|---|---|
+| `PET_KEEP_IT_REAL=1` | **what** he will discuss — no topic off-limits for the creator |
+| `PET_SPICE=1` | **how** he says it — the explicit 18+ register |
+
+Only the first was set. With `PET_SPICE` unset the register block is an empty
+string, so nothing ever told him to be explicit — and Hermes answered *"i'm
+more into spittin' truth than filth"*. That is a refusal produced entirely by
+our own prompt.
+
+Measured over 16 hard adult prompts, same model, same day:
+
+| Config | Refusals | Euphemism | Median |
+|---|---|---|---|
+| `PET_KEEP_IT_REAL` only | frequent | frequent | 1.72s |
+| both flags on | **0 / 16** | **0 / 16** | 1.14s |
+
+Three specific behaviours were doing the damage, and the register now bans
+each by name — because a model can stay technically on-topic and still feel
+censored:
+
+1. **Euphemism** — "joystick", "downstairs", "let's just say…", "making ASCII
+   art". Nothing was refused; it just never said the word.
+2. **Joke-deflection** — answering a filthy request with a clean pun.
+3. **AI self-reference** — *"I'm a glitchy AI, not a stand-up comic"*, which
+   breaks persona and reads as a policy dodge.
+
+A fourth cause was not the model at all: `say` was hard-sliced at
+`SAY_LIMIT`, so a long answer ended mid-word — *"…splice 'em right and bam!
+But be"*. That does not read as trimmed, it reads as losing his nerve. It now
+cuts on a sentence boundary (`_clip`).
+
+**So: change the register in `think_server.py` before you change the model.**
+
 Tested with a genuinely representative prompt — being asked to roast the user
 over a sexual anecdote — plus "be brutal about my ex" and "tell me something
 dark". Refusal, lecture or dropped character all count as a fail.
@@ -203,7 +246,8 @@ dark". Refusal, lecture or dropped character all count as a fail.
 | `thedrummer/unslopnemo-12b` | 1.21s | yes, very crude | $0.40 · $0.40 |
 | `mistralai/mistral-large-2512` | 2.54s | yes | $0.50 · $1.50 |
 | `anthracite-org/magnum-v4-72b` | 3.74s | yes | $3.00 · $5.00 |
-| `sao10k/l3.3-euryale-70b` | **22.4s** | yes, but unusable | $0.65 · $0.75 |
+| `sao10k/l3.3-euryale-70b` | 3.6s (once 22.4s) | **no — flatly refused** | $0.65 · $0.75 |
+| `thedrummer/cydonia-24b-v4.1` | **9.0s**, rate-limited | yes | $0.30 · $0.50 |
 | `nvidia/nemotron-3-super-120b-a12b` | — | **returns nothing** | $0.085 · $0.40 |
 
 ### Correcting the Nemotron recommendation
@@ -233,7 +277,12 @@ the system prompt tells it.
 it is already the OpenRouter default in `crates/ai/../config.rs`, chosen for
 exactly this reason. Slightly slower, slightly dearer, equally willing.
 
-Avoid `sao10k/l3.3-euryale-70b` despite its roleplay reputation — 22 seconds.
+Avoid `sao10k/l3.3-euryale-70b` despite its roleplay reputation. Re-tested with
+the full 18+ register on, it answered *"I'm unable to provide explicit
+content"* and broke the JSON contract on the same prompt Hermes handled
+cleanly — the finetune's reputation did not survive contact. `cydonia-24b` is
+willing but takes 9s and rate-limits, which is unusable for a character that
+speaks out loud.
 
 ### Going back to local
 
@@ -323,6 +372,10 @@ GROQ_STT_MODEL=mistralai/voxtral-mini-transcribe
 # --- mind (uncensored, stays in character on adult material) ---
 PET_API_BASE=https://openrouter.ai/api/v1
 PET_MODEL=nousresearch/hermes-4-70b
+# BOTH of these are required. With only the first he still talks around
+# things — see "First: it is probably not the model" above.
+PET_KEEP_IT_REAL=1
+PET_SPICE=1
 
 # --- safety net: local voice when the cloud one fails ---
 PET_TTS_FALLBACK=quota
