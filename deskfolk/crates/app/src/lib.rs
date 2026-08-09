@@ -33,6 +33,7 @@ mod journal;
 mod mind;
 mod music;
 mod settings;
+mod spotify;
 mod sprite_studio;
 mod stroll;
 mod paths;
@@ -125,6 +126,12 @@ impl deskfolk_render_win::Host for CompanionHost {
             MenuEntry::item("journal", "Today's log").with_icon(Icon::Panel),
             MenuEntry::submenu("Test animations", Icon::Panel, animation_menu(&self.rt)),
         ];
+
+        // Spotify link: only offered when a client id is configured, and only
+        // until the account is actually connected.
+        if spotify::configured() && !spotify::connected() {
+            entries.push(MenuEntry::item("spotify_connect", "Connect Spotify").with_icon(Icon::Panel));
+        }
 
         // Developer-only entry, hidden from shipping users (DESKFOLK_DEV=1).
         if sprite_studio::enabled() {
@@ -1384,6 +1391,14 @@ fn on_menu(app: &AppHandle, id: &str) {
         }
         "center" => open_control_center(app),
         "sprite_studio" => open_sprite_studio(app),
+        "spotify_connect" => {
+            // The flow blocks on a browser round-trip; never on the UI thread.
+            std::thread::spawn(|| {
+                if let Err(e) = spotify::connect() {
+                    tracing::warn!("spotify: connect failed: {e}");
+                }
+            });
+        }
         // Opening it mid-session is useful precisely because the file is
         // written as it happens: what he just said is already in there.
         "journal" => match journal::path() {

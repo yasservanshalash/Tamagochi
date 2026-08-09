@@ -107,7 +107,20 @@ pub fn grant(wish: &Wish) -> bool {
             true
         }
         None => {
-            tracing::info!("music: {} needs the Spotify Web API", wish.describe());
+            // Only `Play(query)` lands here — the one wish media keys cannot
+            // grant. With a linked Spotify account it becomes search-and-play;
+            // off the caller's thread, because it is two network round-trips.
+            if let Wish::Play(q) = wish {
+                if crate::spotify::connected() {
+                    let q = q.clone();
+                    std::thread::spawn(move || match crate::spotify::play(&q) {
+                        Ok(what) => tracing::info!("music: put on {what}"),
+                        Err(e) => tracing::warn!("music: could not put on {q:?}: {e}"),
+                    });
+                    return true;
+                }
+            }
+            tracing::info!("music: {} needs Spotify connected (his menu)", wish.describe());
             false
         }
     }
