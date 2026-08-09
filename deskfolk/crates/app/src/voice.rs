@@ -64,9 +64,20 @@ struct VoiceState {
     level: AtomicU8,
 }
 
+/// What he was last asked to say — enough to decide, when the user talks over
+/// him, whether the point is worth defending.
+#[derive(Default)]
+struct BargeMemo {
+    text: String,
+    at: Option<std::time::Instant>,
+    /// He already pushed back once this utterance; next barge-in always yields.
+    defended: bool,
+}
+
 pub struct Voice {
     tx: Option<Sender<Cmd>>,
     state: Arc<VoiceState>,
+    barge: Mutex<BargeMemo>,
 }
 
 impl Voice {
@@ -76,7 +87,7 @@ impl Voice {
         let state = Arc::new(VoiceState::default());
         let Some(base) = base else {
             tracing::info!("voice: disabled");
-            return Self { tx: None, state };
+            return Self { tx: None, state, barge: Mutex::default() };
         };
 
         let (tx, rx) = mpsc::channel();
@@ -88,11 +99,11 @@ impl Voice {
         {
             Ok(_) => {
                 tracing::info!("voice: speaking through {base}/pet/speak");
-                Self { tx: Some(tx), state }
+                Self { tx: Some(tx), state, barge: Mutex::default() }
             }
             Err(e) => {
                 tracing::warn!("voice: could not start the audio thread: {e}");
-                Self { tx: None, state }
+                Self { tx: None, state, barge: Mutex::default() }
             }
         }
     }
@@ -120,7 +131,56 @@ impl Voice {
             self.state.pending.store(false, Ordering::SeqCst);
             return false;
         }
+        // Remember what he's saying, so a barge-in can judge whether the
+        // point is worth defending.
+        *self.barge.lock() = BargeMemo {
+            text: text.to_string(),
+            at: Some(Instant::now()),
+            defended: false,
+        };
         true
+    }
+
+    /// The user started talking over him. Decide who gets the floor.
+    ///
+    /// Usually he yields — stops mid-word and listens, like a polite person.
+    /// But if he had *just* started a substantial point, he pushes back once:
+    /// "wait wait—" and takes it from the top. A second barge-in on the same
+    /// utterance always yields; he argues for the floor, he doesn't hog it.
+    ///
+    /// Returns true if he yielded (the caller should treat what follows as
+    /// speech meant for him).
+    pub fn barge_in(&self) -> bool {
+        if !self.audible() && !self.pending() {
+            return true; // nothing to concede
+        }
+        let (text, fresh, defended) = {
+            let m = self.barge.lock();
+            (
+                m.text.clone(),
+                m.at.is_some_and(|t| t.elapsed() < Duration::from_secs(3)),
+                m.defended,
+            )
+        };
+        // Worth defending: a real point (not a one-liner), barely begun,
+        // and he hasn't already pushed back this utterance.
+        if !defended && fresh && text.chars().count() >= 100 {
+            const PUSHBACKS: [&str; 3] = [
+                "wait wait — lemme land this first.",
+                "hold up, let me shed some light on why this makes sense.",
+                "nah nah, lemme get this point across — then you can interrupt me. ha!",
+            ];
+            let interject = PUSHBACKS[text.len() % PUSHBACKS.len()];
+            self.stop();
+            self.speak(&format!("{interject} {text}"));
+            self.barge.lock().defended = true;
+            tracing::info!("voice: barged — holding the floor ({interject:?})");
+            false
+        } else {
+            self.stop();
+            tracing::info!("voice: barged — yielding the floor");
+            true
+        }
     }
 
     /// Cut him off mid-sentence.

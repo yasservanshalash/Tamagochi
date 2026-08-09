@@ -152,6 +152,12 @@ pub struct Ears {
     /// of them — so he looks like he is still waiting for you to speak when he
     /// is actually working on the answer.
     pub on_thinking: Arc<dyn Fn() + Send + Sync>,
+    /// Is his own voice coming out of the speakers right now? Barging in only
+    /// means something while it is.
+    pub voice_audible: Arc<dyn Fn() -> bool + Send + Sync>,
+    /// The user talked over him. Returns true if he yielded the floor — in
+    /// which case what follows is speech meant for him, no name required.
+    pub on_barge: Arc<dyn Fn() -> bool + Send + Sync>,
 }
 
 impl Ear {
@@ -311,7 +317,7 @@ fn take_turn(
     let pcm = match preloaded {
         Some(p) => Some(p),
         None => match Recorder::open(&settings.lock()) {
-            Some(rec) => record_turn(&rec, state, DELIBERATE).map(|(pcm, _)| pcm),
+            Some(rec) => record_turn(&rec, state, DELIBERATE, None).map(|(pcm, _, _)| pcm),
             None => {
                 tracing::warn!("mic: no usable input device");
                 None
@@ -358,9 +364,17 @@ fn watch_tick(
     }
     let Some(recorder) = rec.as_ref() else { return };
 
-    let Some((pcm, _)) = record_turn(recorder, state, WATCHING) else {
+    let Some((pcm, _, barged)) = record_turn(recorder, state, WATCHING, Some(ears)) else {
         return;
     };
+
+    if barged {
+        // He yielded mid-sentence to hear this: it is obviously addressed to
+        // him, so it skips the name check and goes straight to a turn.
+        tracing::info!("mic: barge-in — treating the interruption as a turn");
+        take_turn(client, base, settings, state, ears, local_hour(), Some(pcm));
+        return;
+    }
 
     let url = format!("{}/pet/wake", base.trim_end_matches('/'));
     let woke = match client
@@ -437,7 +451,10 @@ fn record_turn(
     rec: &Recorder,
     state: &Arc<EarState>,
     turn: Turn,
-) -> Option<(Vec<u8>, u8)> {
+    // Present only while name-spotting: lets the recorder notice the user
+    // talking over his voice and report the barge-in.
+    ears: Option<&Ears>,
+) -> Option<(Vec<u8>, u8, bool)> {
     let give_up_ms = turn.give_up_ms;
     let mut pre: VecDeque<Vec<u8>> = VecDeque::new();
     let mut pre_bytes = 0usize;
@@ -452,6 +469,10 @@ fn record_turn(
     let mut speech_since: Option<Instant> = None;
     let mut speaking = false;
     let mut quiet_since: Option<Instant> = None;
+    // Barge-in bookkeeping: fired at most once per recording pass.
+    let mut barge_since: Option<Instant> = None;
+    let mut barge_done = false;
+    let mut barged = false;
 
     let mut audio_since: Option<Instant> = None;
     // The quietest the room actually got once we were judging it. If this
@@ -513,6 +534,24 @@ fn record_turn(
 
         quietest = quietest.min(level);
 
+        // Barge-in: sustained sound well above the bar while his own voice is
+        // playing. The raised bar plus the sustain requirement keeps speaker
+        // echo from tripping it on most setups (headphones are immune).
+        if let Some(e) = ears {
+            if !barge_done && (e.voice_audible)() {
+                let barge_bar = thresh.saturating_add(12).max(30);
+                if level >= barge_bar {
+                    let since = *barge_since.get_or_insert_with(Instant::now);
+                    if since.elapsed() >= Duration::from_millis(350) {
+                        barge_done = true;
+                        barged = (e.on_barge)();
+                    }
+                } else {
+                    barge_since = None;
+                }
+            }
+        }
+
         if speaking {
             pcm.extend_from_slice(&chunk);
         } else if !chunk.is_empty() {
@@ -550,7 +589,7 @@ fn record_turn(
                          (floor {floor}, bar {thresh})",
                         secs(pcm.len())
                     );
-                    return Some((pcm, peak));
+                    return Some((pcm, peak, barged));
                 }
             }
         }
@@ -570,7 +609,7 @@ fn record_turn(
                 turn.max_ms,
                 if speaking { "sending what there is" } else { "nothing was said" },
             );
-            return if speaking { Some((pcm, peak)) } else { None };
+            return if speaking { Some((pcm, peak, barged)) } else { None };
         }
     }
 }
@@ -753,6 +792,8 @@ mod tests {
                 on_idle: Arc::new(|| {}),
                 on_wake: Arc::new(|| {}),
                 on_thinking: Arc::new(|| {}),
+                voice_audible: Arc::new(|| false),
+                on_barge: Arc::new(|| true),
             },
         );
         assert!(!ear.is_enabled());

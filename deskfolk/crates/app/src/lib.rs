@@ -627,10 +627,21 @@ pub(crate) fn boot_companion(app: &AppHandle) -> anyhow::Result<()> {
         let rt = rt.clone();
         Arc::new(move || rt.lock().engine.begin_listening()) as Arc<dyn Fn() + Send + Sync>
     };
+    // Barge-in: the ear watches for the user talking over his voice; the voice
+    // decides whether to yield the floor or push back ("wait wait — lemme land
+    // this first") before listening.
+    let voice_audible = {
+        let voice = voice.clone();
+        Arc::new(move || voice.audible()) as Arc<dyn Fn() -> bool + Send + Sync>
+    };
+    let on_barge = {
+        let voice = voice.clone();
+        Arc::new(move || voice.barge_in()) as Arc<dyn Fn() -> bool + Send + Sync>
+    };
     let ear = Arc::new(Ear::new(
         config::resolve_voice(),
         audio_settings.clone(),
-        ear::Ears { on_reply, on_idle, on_wake, on_thinking },
+        ear::Ears { on_reply, on_idle, on_wake, on_thinking, voice_audible, on_barge },
     ));
 
     app.manage(AppState {
