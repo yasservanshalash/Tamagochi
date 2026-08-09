@@ -137,6 +137,7 @@ pub fn ask(
     rt: Arc<Mutex<Runtime>>,
     mind: Arc<Mind>,
     voice: Arc<Voice>,
+    nudge: Arc<Mutex<Option<crate::stroll::Facing>>>,
     event: String,
     text: String,
 ) {
@@ -184,6 +185,12 @@ pub fn ask(
                     spoken: has_audio,
                     took,
                 });
+                // A walk he decided on goes to the wander loop, the same
+                // channel the menu and a spoken order use. The engine still
+                // gets the reply for the pose and for listen/sleep.
+                if crate::agent::route_walk(&reply.action, &nudge) {
+                    journal::did(format!("set off walking ({})", reply.action));
+                }
                 let mut guard = rt.lock();
                 guard.inputs.busy = false;
                 guard.inputs.voice_pending = has_audio;

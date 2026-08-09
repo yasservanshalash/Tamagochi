@@ -138,6 +138,70 @@ impl<'a> Canvas<'a> {
         }
     }
 
+    /// Nearest-neighbour blit of a *sub-rectangle* of a premultiplied source
+    /// image — the modular renderer's workhorse.
+    ///
+    /// One generated sheet holds many parts; this draws region
+    /// `(sx, sy, srw, srh)` of that sheet into dest `(dx, dy, dw, dh)` without
+    /// copying pixels into a per-part buffer first (the "prefer atlas regions
+    /// over duplicating files" rule). Same integer, nearest-neighbour path as
+    /// [`blit_scaled`] — no smoothing, no per-part interpolation — so pixel art
+    /// stays crisp. The source rectangle is clamped to the sheet so a bad region
+    /// cannot read out of bounds.
+    #[allow(clippy::too_many_arguments)]
+    pub fn blit_scaled_src(
+        &mut self,
+        src: &[Px],
+        sheet_w: u32,
+        sheet_h: u32,
+        sx: u32,
+        sy: u32,
+        srw: u32,
+        srh: u32,
+        dx: i32,
+        dy: i32,
+        dw: i32,
+        dh: i32,
+        alpha: u8,
+        flip_x: bool,
+    ) {
+        if sheet_w == 0 || sheet_h == 0 || srw == 0 || srh == 0 || dw <= 0 || dh <= 0 || alpha == 0 {
+            return;
+        }
+        // Clamp the source rectangle to the sheet bounds.
+        let sx = sx.min(sheet_w - 1);
+        let sy = sy.min(sheet_h - 1);
+        let srw = srw.min(sheet_w - sx);
+        let srh = srh.min(sheet_h - sy);
+
+        // Clip the destination to the canvas before touching a pixel.
+        let x0 = dx.max(0);
+        let y0 = dy.max(0);
+        let x1 = (dx + dw).min(self.w);
+        let y1 = (dy + dh).min(self.h);
+        if x0 >= x1 || y0 >= y1 {
+            return;
+        }
+        for y in y0..y1 {
+            // Map dest row -> source row within the rectangle.
+            let ry = (((y - dy) as i64 * srh as i64) / dh as i64) as usize;
+            let ry = ry.min(srh as usize - 1);
+            let row = (sy as usize + ry) * sheet_w as usize;
+            for x in x0..x1 {
+                let rx = (((x - dx) as i64 * srw as i64) / dw as i64) as usize;
+                let rx = rx.min(srw as usize - 1);
+                let rx = if flip_x { srw as usize - 1 - rx } else { rx };
+                let s = src[row + sx as usize + rx];
+                if s >> 24 == 0 {
+                    continue;
+                }
+                let s = scale_alpha(s, alpha);
+                let i = (y as usize) * (self.w as usize) + x as usize;
+                self.px[i] = over(self.px[i], s);
+            }
+        }
+    }
+
     /// Composite a solid colour through an 8-bit coverage map — how text gets
     /// onto the canvas. GDI cannot draw text into an alpha channel, so glyphs
     /// are rendered white-on-black elsewhere and their brightness becomes
@@ -516,6 +580,63 @@ mod tests {
         let src = vec![rgba(255, 255, 255, 255); 4];
         c.blit_scaled(&src, 2, 2, 0, 0, 2, 2, 128);
         assert_eq!(c.get(0, 0) >> 24, 128);
+    }
+
+    #[test]
+    fn blit_src_draws_only_the_chosen_region() {
+        // A 2x2 "sheet": only the top-right cell is red; the rest transparent.
+        let red = rgba(255, 0, 0, 255);
+        let sheet = vec![0, red, 0, 0]; // (0,0)=_, (1,0)=red, (0,1)=_, (1,1)=_
+        let mut buf = canvas(1, 1);
+        let mut c = Canvas::new(&mut buf, 1, 1);
+        // Draw the red cell at region (1,0,1,1) into the 1x1 canvas.
+        c.blit_scaled_src(&sheet, 2, 2, 1, 0, 1, 1, 0, 0, 1, 1, 255, false);
+        assert_eq!(c.get(0, 0), red);
+
+        // Drawing a transparent cell leaves the canvas untouched.
+        let mut buf2 = canvas(1, 1);
+        let mut c2 = Canvas::new(&mut buf2, 1, 1);
+        c2.blit_scaled_src(&sheet, 2, 2, 0, 0, 1, 1, 0, 0, 1, 1, 255, false);
+        assert_eq!(c2.get(0, 0), 0);
+    }
+
+    #[test]
+    fn blit_src_flips_horizontally() {
+        // 2x1 sheet: left red, right blue. Flipped into a 2x1 canvas, blue lands left.
+        let red = rgba(255, 0, 0, 255);
+        let blue = rgba(0, 0, 255, 255);
+        let sheet = vec![red, blue];
+        let mut buf = canvas(2, 1);
+        let mut c = Canvas::new(&mut buf, 2, 1);
+        c.blit_scaled_src(&sheet, 2, 1, 0, 0, 2, 1, 0, 0, 2, 1, 255, true);
+        assert_eq!(c.get(0, 0), blue);
+        assert_eq!(c.get(1, 0), red);
+    }
+
+    #[test]
+    fn blit_src_upscales_a_region_with_nearest_neighbour() {
+        let red = rgba(255, 0, 0, 255);
+        let sheet = vec![0, red, 0, 0];
+        let mut buf = canvas(4, 4);
+        let mut c = Canvas::new(&mut buf, 4, 4);
+        // Blow the single red cell up to fill 4x4 — every pixel should be red.
+        c.blit_scaled_src(&sheet, 2, 2, 1, 0, 1, 1, 0, 0, 4, 4, 255, false);
+        for y in 0..4 {
+            for x in 0..4 {
+                assert_eq!(c.get(x, y), red, "pixel {x},{y}");
+            }
+        }
+    }
+
+    #[test]
+    fn blit_src_clamps_an_oversized_region() {
+        // A region wider than the sheet must not read out of bounds.
+        let red = rgba(255, 0, 0, 255);
+        let sheet = vec![red; 4]; // 2x2 all red
+        let mut buf = canvas(2, 2);
+        let mut c = Canvas::new(&mut buf, 2, 2);
+        c.blit_scaled_src(&sheet, 2, 2, 0, 0, 99, 99, 0, 0, 2, 2, 255, false);
+        assert_eq!(c.get(1, 1), red);
     }
 
     #[test]

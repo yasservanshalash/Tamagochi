@@ -25,11 +25,15 @@ use tauri::{
 };
 
 mod audio;
+mod commands;
 mod config;
 mod ear;
+mod agent;
 mod journal;
 mod mind;
 mod music;
+mod settings;
+mod sprite_studio;
 mod stroll;
 mod paths;
 mod runtime;
@@ -49,6 +53,9 @@ pub struct AppState {
     /// wander loop, because the loop owns the journey and the menu handler
     /// runs on another thread entirely.
     nudge: Arc<Mutex<Option<stroll::Facing>>>,
+    /// "Instant-transmit somewhere, now." Same idea as `nudge`: set by the menu,
+    /// consumed by the wander loop, which owns the teleport state.
+    teleport_req: Arc<Mutex<bool>>,
 }
 
 /// Menu ids are `deskfolk::out::<device name>` / `::in::<device name>`, so the
@@ -73,6 +80,9 @@ struct CompanionHost {
     voice: Arc<Voice>,
     ear: Arc<Ear>,
     audio: Arc<Mutex<audio::AudioSettings>>,
+    /// The walk channel, so a poke that becomes a spoken order can set him off
+    /// through the same path the menu's Walk uses.
+    nudge: Arc<Mutex<Option<stroll::Facing>>>,
 }
 
 impl deskfolk_render_win::Host for CompanionHost {
@@ -81,7 +91,7 @@ impl deskfolk_render_win::Host for CompanionHost {
         let settings = self.audio.lock().clone();
         let devices = audio::list_devices(&settings);
 
-        vec![
+        let mut entries = vec![
             // The shortcut is in the label because a global hotkey nobody
             // knows about is a hotkey nobody uses.
             MenuEntry::item("talk", format!("Talk to him    {}", hotkey_label()))
@@ -114,9 +124,16 @@ impl deskfolk_render_win::Host for CompanionHost {
             MenuEntry::item("center", "Control Center").with_icon(Icon::Panel),
             MenuEntry::item("journal", "Today's log").with_icon(Icon::Panel),
             MenuEntry::submenu("Test animations", Icon::Panel, animation_menu(&self.rt)),
-            MenuEntry::Separator,
-            MenuEntry::item("quit", "Quit Deskfolk").with_icon(Icon::Quit),
-        ]
+        ];
+
+        // Developer-only entry, hidden from shipping users (DESKFOLK_DEV=1).
+        if sprite_studio::enabled() {
+            entries.push(MenuEntry::item("sprite_studio", "Sprite Studio (dev)").with_icon(Icon::Panel));
+        }
+
+        entries.push(MenuEntry::Separator);
+        entries.push(MenuEntry::item("quit", "Quit Deskfolk").with_icon(Icon::Quit));
+        entries
     }
 
     fn on_click(&self) {
@@ -157,6 +174,7 @@ impl deskfolk_render_win::Host for CompanionHost {
             self.rt.clone(),
             self.mind.clone(),
             self.voice.clone(),
+            self.nudge.clone(),
             "user_poke".into(),
             String::new(),
         );
@@ -267,11 +285,47 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .invoke_handler(tauri::generate_handler![
+            commands::get_settings,
+            commands::save_settings,
+            commands::finish_onboarding,
+            commands::list_characters,
+            commands::character_portrait,
+            commands::list_audio_devices,
+            sprite_studio::dev_mode,
+            sprite_studio::sprite_specs,
+            sprite_studio::list_sprites,
+            sprite_studio::batches,
+            sprite_studio::reference_sheet,
+            sprite_studio::assembly,
+            sprite_studio::rig,
+            sprite_studio::slot_prompt,
+            sprite_studio::image_models,
+            sprite_studio::generate_sprite,
+            sprite_studio::accept_sprite,
+            sprite_studio::slice_accept,
+            sprite_studio::region_accept,
+            sprite_studio::state_accept,
+        ])
         .setup(|app| {
             let handle = app.handle().clone();
-            if let Err(e) = boot_companion(&handle) {
-                tracing::error!("could not start the companion: {e:#}");
-                return Err(e.into());
+            // A hidden, webview-less window that keeps the app's window count
+            // above zero. The companion is a native window Tauri doesn't count,
+            // so without this, closing the wizard or the Control Center would be
+            // the "last window" and Tauri would exit and take him with it. With
+            // it, those closes are ordinary window closes that just work — no
+            // exit-handling gymnastics.
+            create_keepalive(&handle);
+            // First launch: meet him through the wizard, which boots the
+            // companion itself once it finishes. Afterwards, boot straight in.
+            if settings::load(&handle).first_run_complete {
+                if let Err(e) = boot_companion(&handle) {
+                    tracing::error!("could not start the companion: {e:#}");
+                    return Err(e.into());
+                }
+            } else {
+                tracing::info!("first run — opening the onboarding wizard");
+                open_wizard(&handle);
             }
             install_tray(&handle)?;
             Ok(())
@@ -279,10 +333,9 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("failed to launch Deskfolk")
         .run(|_app, event| {
-            // Seal the journal however the session ends, not only via the menu
-            // item — closing from the tray, a shutdown, or anything else that
-            // unwinds cleanly should still leave the day summarised. `finish`
-            // only writes once, so the menu path calling it first is fine.
+            // Seal the journal however the session ends — the tray, a shutdown,
+            // anything that unwinds cleanly. `finish` only writes once. The
+            // keepalive window means only an explicit Quit gets us here.
             if matches!(event, tauri::RunEvent::Exit) {
                 journal::finish();
             }
@@ -333,6 +386,12 @@ fn animation_menu(rt: &Arc<Mutex<Runtime>>) -> Vec<MenuEntry> {
 
     let entry = |n: &str| MenuEntry::item(format!("{ANIM_PREFIX}{n}"), pretty(n));
     let mut out = Vec::new();
+    // Instant transmission is a two-part clip (vanish, then reappear), so it is
+    // a special item that plays the whole effect in place rather than a raw
+    // clip — and the raw halves are hidden from the list below.
+    if have.iter().any(|h| h == "teleport_out_a") {
+        out.push(MenuEntry::item(format!("{ANIM_PREFIX}teleport"), "Instant transmission"));
+    }
     let mut placed: Vec<&str> = Vec::new();
     for (label, names) in ANIM_GROUPS {
         let items: Vec<MenuEntry> = names
@@ -347,8 +406,10 @@ fn animation_menu(rt: &Arc<Mutex<Runtime>>) -> Vec<MenuEntry> {
             out.push(MenuEntry::submenu(label, Icon::Panel, items));
         }
     }
-    let mut rest: Vec<&String> =
-        have.iter().filter(|h| !placed.contains(&h.as_str())).collect();
+    let mut rest: Vec<&String> = have
+        .iter()
+        .filter(|h| !placed.contains(&h.as_str()) && !h.starts_with("teleport"))
+        .collect();
     rest.sort();
     if !rest.is_empty() {
         out.push(MenuEntry::submenu(
@@ -433,8 +494,10 @@ fn brain_health(base_url: &str) -> Option<serde_json::Value> {
     .flatten()
 }
 
-fn boot_companion(app: &AppHandle) -> anyhow::Result<()> {
-    let id = std::env::var("DESKFOLK_CHARACTER").unwrap_or_else(|_| "yasser".into());
+pub(crate) fn boot_companion(app: &AppHandle) -> anyhow::Result<()> {
+    // The wizard writes these; the environment still wins for dev overrides.
+    let saved = settings::load(app);
+    let id = std::env::var("DESKFOLK_CHARACTER").unwrap_or_else(|_| saved.character.clone());
     let root = paths::characters_dir(app).join(&id);
     tracing::info!("loading character package from {}", root.display());
 
@@ -464,9 +527,9 @@ fn boot_companion(app: &AppHandle) -> anyhow::Result<()> {
     let stage = pkg.manifest.stage;
     let rt = Runtime::new(pkg.clone(), masks, scale);
 
-    // Provider comes from settings once the Control Center lands; until then
-    // it is resolved from the environment and any .env already on disk.
-    let (provider_config, why) = config::resolve_provider();
+    // Basic tier = the bundled local brain; advanced = the user's own provider.
+    // Falls back to the environment when nothing is configured yet.
+    let (provider_config, why) = config::provider_from_settings(&saved.brain);
     tracing::info!("mind: {} — {why}", provider_config.describe());
     let mind = Arc::new(Mind::new(&provider_config));
 
@@ -496,16 +559,30 @@ fn boot_companion(app: &AppHandle) -> anyhow::Result<()> {
 
     let rt = Arc::new(Mutex::new(rt));
 
+    // "Someone asked him to walk" — set by the menu's Walk, by a spoken "take a
+    // walk", and read by the wander loop. Created here so the reply handler can
+    // reach it, since a walk the mind decided on flows through the same channel
+    // as one the menu asked for.
+    let nudge: Arc<Mutex<Option<stroll::Facing>>> = Arc::new(Mutex::new(None));
+    // "Teleport somewhere now", set by the menu and consumed by the wander loop.
+    let teleport_req: Arc<Mutex<bool>> = Arc::new(Mutex::new(false));
+
     // What to do when he has actually heard something: remember the exchange,
     // start speaking the reply, and only then hand it to the engine — the
     // pose depends on whether audio is coming.
     let on_reply = {
-        let (rt, mind, voice) = (rt.clone(), mind.clone(), voice.clone());
+        let (rt, mind, voice, nudge) = (rt.clone(), mind.clone(), voice.clone(), nudge.clone());
         Arc::new(move |h: ear::Heard| {
             tracing::info!("he replied to speech: {:?} ({})", h.say, h.emotion);
             mind::remember_exchange(&mind, &h.heard, &h.say);
             let has_audio = voice.speak(&h.say);
             mind::obey_music(h.music.as_ref());
+            // A movement he was told to make (or chose): route it to the wander
+            // loop. Not mutually exclusive with speaking — he can say "aight"
+            // and set off at once.
+            if agent::route_walk(&h.action, &nudge) {
+                journal::did(format!("set off walking ({})", h.action));
+            }
             // Spoken turns never pass through `mind::ask` — the ear talks to
             // the brain itself — so this is the only place they can be
             // journalled, and they are the most interesting entries there are.
@@ -556,13 +633,13 @@ fn boot_companion(app: &AppHandle) -> anyhow::Result<()> {
         ear::Ears { on_reply, on_idle, on_wake, on_thinking },
     ));
 
-    let nudge: Arc<Mutex<Option<stroll::Facing>>> = Arc::new(Mutex::new(None));
     app.manage(AppState {
         rt: rt.clone(),
         audio: audio_settings.clone(),
         voice: voice.clone(),
         ear: ear.clone(),
         nudge: nudge.clone(),
+        teleport_req: teleport_req.clone(),
     });
 
     let host = Arc::new(CompanionHost {
@@ -572,6 +649,7 @@ fn boot_companion(app: &AppHandle) -> anyhow::Result<()> {
         voice: voice.clone(),
         ear: ear.clone(),
         audio: audio_settings,
+        nudge: nudge.clone(),
     });
 
     // DESKFOLK_LAYER=desktop makes him an actual resident of the desktop —
@@ -609,7 +687,7 @@ fn boot_companion(app: &AppHandle) -> anyhow::Result<()> {
 
     std::thread::Builder::new()
         .name("deskfolk-companion-loop".into())
-        .spawn(move || companion_loop(companion, rt, mind, voice, ear, nudge))?;
+        .spawn(move || companion_loop(companion, rt, mind, voice, ear, nudge, teleport_req))?;
 
     Ok(())
 }
@@ -629,6 +707,7 @@ fn companion_loop(
     voice: Arc<Voice>,
     ear: Arc<Ear>,
     nudge: Arc<Mutex<Option<stroll::Facing>>>,
+    teleport_req: Arc<Mutex<bool>>,
 ) {
     let period = Duration::from_millis(LOOP_MS);
     let mut last = Instant::now();
@@ -648,6 +727,15 @@ fn companion_loop(
         tracing::info!("wander: on, {gait:?} — he will move between your windows");
     }
     let mut walk = stroll::Stroll::new(stroll::REST_MIN.as_millis() as i64);
+    // How many more hops are left in the current outing. One walk is no longer
+    // one trip: a roam chains several crossings before he settles.
+    let mut roam: u32 = 0;
+    // An instant transmission in progress, if any: he never walks the Y axis, so
+    // a change of level is this — vanish here, appear there.
+    let mut teleport: Option<Teleport> = None;
+    // The last surface he set off *from*, kept so an outing avoids both where he
+    // is and where he just was — no teleporting back and forth between two spots.
+    let mut last_ledge = String::new();
     let mut roll: u32 = 0;
 
     loop {
@@ -664,7 +752,10 @@ fn companion_loop(
 
         if wander {
             roll = roll.wrapping_add(1);
-            wander_tick(&companion, &rt, &mut walk, gait, walker_h, dt, roll, &nudge);
+            wander_tick(
+                &companion, &rt, &mut walk, &mut roam, &mut teleport, &mut last_ledge, gait,
+                walker_h, dt, roll, &nudge, &teleport_req,
+            );
         }
 
         let hour = local_hour();
@@ -691,7 +782,7 @@ fn companion_loop(
         };
 
         for e in &effects {
-            handle_effect(&rt, &mind, &voice, &ear, hour, e);
+            handle_effect(&rt, &mind, &voice, &ear, &nudge, hour, e);
         }
 
         // Only wake the window when something visible actually changed.
@@ -710,6 +801,188 @@ fn companion_loop(
     }
 }
 
+/// An instant transmission in progress — the Dragon Ball move. He walks the X
+/// axis; a change of level is this instead of a climb: he vanishes here and
+/// appears there. Two sprite sheets, `a` (blue) and `b` (gold), chosen at
+/// random each time so it is not the same trick twice.
+struct Teleport {
+    sheet: char,
+    /// Which way he faces through it — the way he is travelling. The art faces
+    /// right as drawn, so a leftward jump plays the mirrored (`_l`) clips.
+    face: stroll::Facing,
+    phase: TeleportPhase,
+    /// Time left in the current half.
+    left_ms: i64,
+    /// Where he reappears.
+    dest: (i32, i32),
+    /// The ledge he is bound for, for the journal and the settle.
+    on: String,
+}
+
+#[derive(PartialEq)]
+enum TeleportPhase {
+    Vanish,
+    Appear,
+}
+
+/// Per-frame time of the teleport clips — must match `character.json`, since the
+/// movement loop times the disappearance itself rather than asking the engine.
+const TP_FRAME_MS: i64 = 85;
+/// A height change bigger than this is an instant transmission, not a walk — he
+/// never travels the Y axis on foot. Small enough that shuffling along the same
+/// ledge is still a walk.
+const TELEPORT_IF_DY_OVER: i32 = 24;
+
+impl Teleport {
+    fn out_clip(&self) -> &'static str {
+        match (self.sheet, self.face) {
+            ('a', stroll::Facing::Right) => "teleport_out_a",
+            ('a', stroll::Facing::Left) => "teleport_out_a_l",
+            (_, stroll::Facing::Right) => "teleport_out_b",
+            (_, stroll::Facing::Left) => "teleport_out_b_l",
+        }
+    }
+    fn in_clip(&self) -> &'static str {
+        match (self.sheet, self.face) {
+            ('a', stroll::Facing::Right) => "teleport_in_a",
+            ('a', stroll::Facing::Left) => "teleport_in_a_l",
+            (_, stroll::Facing::Right) => "teleport_in_b",
+            (_, stroll::Facing::Left) => "teleport_in_b_l",
+        }
+    }
+    /// How long a half runs: its frame count times the per-frame time. Sheet `a`
+    /// is six frames each way, `b` eight.
+    fn half_ms(sheet: char) -> i64 {
+        (if sheet == 'a' { 6 } else { 8 }) * TP_FRAME_MS
+    }
+}
+
+/// Set off for `(tx, ty)`: a walk if it is the same height, an instant
+/// transmission if it is a different one. This is the one place the "always X on
+/// foot, Y by teleport" rule lives.
+fn begin_leg(
+    rt: &Arc<Mutex<Runtime>>,
+    walk: &mut stroll::Stroll,
+    teleport: &mut Option<Teleport>,
+    roll: u32,
+    from_x: i32,
+    from_y: i32,
+    title: String,
+    tx: i32,
+    ty: i32,
+) {
+    if (ty - from_y).abs() <= TELEPORT_IF_DY_OVER {
+        // Same level: walk the X axis, dead flat (target height forced to his
+        // own, so a couple of stray pixels never become a hop).
+        walk.walk_to(title, from_x, tx, from_y, from_y, roll);
+    } else {
+        // Different level: instant transmission.
+        start_teleport(rt, teleport, roll, from_x, title, tx, ty);
+    }
+}
+
+/// Begin an instant transmission to `(tx, ty)`, whatever the height difference —
+/// the forced version `begin_leg` uses for a level change and the menu uses to
+/// send him somewhere on demand. Picks a sheet at random and faces the way he is
+/// going, so the vanish and the arrival both point toward the destination.
+fn start_teleport(
+    rt: &Arc<Mutex<Runtime>>,
+    teleport: &mut Option<Teleport>,
+    roll: u32,
+    from_x: i32,
+    title: String,
+    tx: i32,
+    ty: i32,
+) {
+    let sheet = if roll & 1 == 0 { 'a' } else { 'b' };
+    let face = if tx >= from_x { stroll::Facing::Right } else { stroll::Facing::Left };
+    let tp = Teleport {
+        sheet,
+        face,
+        phase: TeleportPhase::Vanish,
+        left_ms: Teleport::half_ms(sheet),
+        dest: (tx, ty),
+        on: title.clone(),
+    };
+    let _ = rt.lock().engine.play_emotion(tp.out_clip(), 0, 20_000);
+    journal::did(format!("instant transmission to {title:?} (sheet {sheet}, {face:?})"));
+    tracing::debug!("vanishing (sheet {sheet}, {face:?}) to appear at {:?}", tp.dest);
+    *teleport = Some(tp);
+}
+
+/// Advance an instant transmission: hold for the vanish, jump, hold for the
+/// appear, then carry on roaming (or settle).
+fn advance_teleport(
+    companion: &Companion,
+    rt: &Arc<Mutex<Runtime>>,
+    walk: &mut stroll::Stroll,
+    roam: &mut u32,
+    teleport: &mut Option<Teleport>,
+    dt: i64,
+    roll: u32,
+) {
+    let done_on = {
+        let Some(tp) = teleport.as_mut() else { return };
+        tp.left_ms -= dt;
+        if tp.left_ms > 0 {
+            return;
+        }
+        match tp.phase {
+            TeleportPhase::Vanish => {
+                // Gone here — appear over there, instantly.
+                companion.move_to(tp.dest.0, tp.dest.1);
+                let _ = rt.lock().engine.play_emotion(tp.in_clip(), 0, 20_000);
+                tp.phase = TeleportPhase::Appear;
+                tp.left_ms = Teleport::half_ms(tp.sheet);
+                return;
+            }
+            // Materialised. Fall through to continue the outing.
+            TeleportPhase::Appear => tp.on.clone(),
+        }
+    };
+    *teleport = None;
+    continue_roam_or_settle(companion, rt, walk, roam, roll, done_on);
+}
+
+/// He has arrived somewhere (on foot or by teleport): now roam *locally* — walk
+/// a few times along the ledge he landed on — then settle facing a direction.
+///
+/// The local roam is deliberately confined to this ledge: it is flat, so never
+/// another teleport, and it never leaves, so he explores where he landed instead
+/// of instantly transmitting back to where he came from. One outing is: travel
+/// to a new place, wander it, sit down.
+fn continue_roam_or_settle(
+    companion: &Companion,
+    rt: &Arc<Mutex<Runtime>>,
+    walk: &mut stroll::Stroll,
+    roam: &mut u32,
+    roll: u32,
+    on: String,
+) {
+    if *roam > 0 {
+        *roam -= 1;
+        let (x, from_y) = companion.position();
+        let (w, _) = companion.size();
+        let ledges = companion.ledges();
+        if let Some(l) = ledges.iter().find(|l| l.title == on) {
+            let tx = stroll::spot_on(l, x + w / 2, w / 2, roll) - w / 2;
+            tracing::debug!("wander: local walk on {on:?} ({} left)", *roam);
+            // Flat: same ledge, same height, so it is a walk and never a hop or
+            // a teleport.
+            walk.walk_to(on.clone(), x, tx, from_y, from_y, roll);
+            return;
+        }
+        // The ledge he arrived on is gone (window closed): just settle.
+    }
+    *roam = 0;
+    tracing::debug!("wander: settled on {on:?}");
+    journal::did(format!("settled on {on:?}"));
+    // Done walking: turn and face the screen, head-on — the plain standing pose,
+    // not a frozen stride and not his beanbag.
+    let _ = rt.lock().engine.play_emotion("stand", 0, 0);
+    walk.rest(on, rest_for(roll));
+}
+
 /// One tick of wandering: read the desktop, decide, move.
 ///
 /// The engine is not involved in *where* he is — it owns what he is doing, and
@@ -719,12 +992,22 @@ fn wander_tick(
     companion: &Companion,
     rt: &Arc<Mutex<Runtime>>,
     walk: &mut stroll::Stroll,
+    roam: &mut u32,
+    teleport: &mut Option<Teleport>,
+    last_ledge: &mut String,
     gait: stroll::Gait,
     walker_h: u32,
     dt: i64,
     roll: u32,
     nudge: &Arc<Mutex<Option<stroll::Facing>>>,
+    teleport_req: &Arc<Mutex<bool>>,
 ) {
+    // An instant transmission runs on its own clock; nothing else moves while
+    // he is between places.
+    if teleport.is_some() {
+        advance_teleport(companion, rt, walk, roam, teleport, dt, roll);
+        return;
+    }
     // He only wanders when he has nothing better to do. Walking off mid-answer
     // would be worse than standing still.
     let free = {
@@ -735,8 +1018,16 @@ fn wander_tick(
             && !guard.inputs.voice_audible
     };
 
-    let (x, _) = companion.position();
-    let (w, _) = companion.size();
+    // His current top-left, the second of which is the height he sets off from —
+    // so a crossing to a differently-heighted ledge is a hop onto it, not a
+    // teleport.
+    let (x, from_y) = companion.position();
+    // The ledge he is on right now, so a new outing goes *elsewhere* and never
+    // straight back. Read before the tick, while he is still resting on it.
+    let current_ledge = match &*walk {
+        stroll::Stroll::Resting { on, .. } => on.clone(),
+        stroll::Stroll::Walking { to, .. } => to.clone(),
+    };
     // His height as drawn, which is what every pace in `stroll` is derived
     // from: the same walk has to read the same on a 4K panel as on a 1080p one.
     let height_px = (walker_h as f64 * companion.unit()).round() as i32;
@@ -763,26 +1054,48 @@ fn wander_tick(
             }
         }
         stroll::Step::Arrived { on } => {
-            tracing::debug!("wander: settled on {on:?}");
-            journal::did(format!("moved to stand on {on:?}"));
-            // The standing pose, not a frozen stride and not his beanbag: he
-            // has just walked somewhere and is on his feet there.
-            let _ = rt.lock().engine.play_emotion("stand", 0, 0);
-            walk.rest(on, rest_for(roll));
+            // Roam this ledge a little more, or settle facing a direction.
+            continue_roam_or_settle(companion, rt, walk, roam, roll, on);
             return;
         }
     }
 
-    // Asked for a walk from the menu: go now, that way, wherever he is in his
-    // resting time. Taken before the restless check, which is the whole point.
-    let asked = nudge.lock().take();
-    if let Some(dir) = asked {
-        if free {
-            if let Some((title, target_x, target_y)) = far_end(companion, dir) {
-                tracing::debug!("wander: asked to walk {dir:?} toward {title:?}");
-                walk.walk_to(title, x, target_x, target_y, roll);
+    // Asked for a walk — from the menu, or by the mind granting a spoken "take
+    // a walk". Go that way, wherever he is in his resting time, before the
+    // restless check, which is the whole point of asking. Only *consume* the
+    // request once he is free to act on it: the mind sets it the instant he
+    // starts speaking the "aight, on my way" line, and taking it unconditionally
+    // would eat the order mid-sentence and drop it, so he answered and never
+    // moved. Leaving it on the nudge lets him set off the moment he stops.
+    if free {
+        if let Some(dir) = nudge.lock().take() {
+            // A told walk is a whole roam, not a step: several hops across the
+            // screen. The first heads the way he was asked (bare "walk" already
+            // arrives here as a coin-flip direction); the rest roam freely.
+            *roam = roam_count(roll, ROAM_TOLD);
+            let avoid = [current_ledge.clone(), last_ledge.clone()];
+            if let Some((title, tx, ty)) =
+                pick_destination(companion, walker_h, x, &avoid, Some(dir), roll)
+            {
+                tracing::debug!("wander: asked to walk {dir:?} — setting off to {title:?}");
+                *last_ledge = current_ledge.clone();
+                begin_leg(rt, walk, teleport, roll, x, from_y, title, tx, ty);
                 return;
             }
+        }
+    }
+
+    // Asked to instant-transmit from the menu: pick a fresh spot and go, always
+    // as a teleport (never a walk), then settle. `roam = 0` so it is a single
+    // hop, not the start of a wander.
+    if free && std::mem::replace(&mut *teleport_req.lock(), false) {
+        let avoid = [current_ledge.clone(), last_ledge.clone()];
+        if let Some((title, tx, ty)) = pick_destination(companion, walker_h, x, &avoid, None, roll) {
+            tracing::info!("menu: instant transmission to {title:?}");
+            *roam = 0;
+            *last_ledge = current_ledge.clone();
+            start_teleport(rt, teleport, roll, x, title, tx, ty);
+            return;
         }
     }
 
@@ -798,59 +1111,117 @@ fn wander_tick(
         }
         return;
     }
-    // Time to consider somewhere new.
-    let ledges = companion.ledges();
-    let resting_on = match walk {
-        stroll::Stroll::Resting { on, .. } => on.clone(),
-        _ => String::new(),
-    };
-    match stroll::pick(&ledges, x + w / 2, &resting_on, roll) {
-        Some(l) => {
-            // Land his *feet* on the edge. The stage keeps empty canvas below
-            // the anchor, so putting the window's bottom there left him
-            // hovering above the ledge by that margin.
-            let target_x = stroll::spot_on(l, x + w / 2, w / 2, roll) - w / 2;
-            let target_y = l.top - companion.feet_offset();
-            tracing::debug!(
-                "wander: setting off {} for {:?} — {}px, ledge top {}, window y {target_y}",
-                if target_x < x { "left" } else { "right" },
-                l.title,
-                (target_x - x).abs(),
-                l.top,
-            );
-            walk.walk_to(l.title.clone(), x, target_x, target_y, roll);
+    // Time to travel somewhere new — a random different surface, then roam it
+    // locally. Avoid both where he is and where he last was, so successive
+    // teleports scatter across the screen instead of bouncing between two spots.
+    let avoid = [current_ledge.clone(), last_ledge.clone()];
+    match pick_destination(companion, walker_h, x, &avoid, None, roll) {
+        Some((title, tx, ty)) => {
+            *roam = roam_count(roll, ROAM_AUTO);
+            tracing::debug!("wander: setting off for {title:?}, then roaming {} more", *roam);
+            *last_ledge = current_ledge.clone();
+            begin_leg(rt, walk, teleport, roll, x, from_y, title, tx, ty);
         }
         // Nowhere worth going: wait before asking again rather than
         // re-scanning the whole desktop every frame.
-        None => walk.rest(resting_on, rest_for(roll)),
+        None => {
+            let resting_on = match walk {
+                stroll::Stroll::Resting { on, .. } => on.clone(),
+                _ => String::new(),
+            };
+            walk.rest(resting_on, rest_for(roll));
+        }
     }
 }
 
-/// The far end of whatever he is standing on, in the given direction.
+/// How many times he walks *locally* after arriving somewhere, before settling
+/// — told, and on his own. One outing is: travel to a new surface (a walk or a
+/// teleport), wander it this many times, then sit down. He never travels back on
+/// the same outing, which is what stopped him instant-transmitting in circles.
+const ROAM_TOLD: (u32, u32) = (1, 3);
+const ROAM_AUTO: (u32, u32) = (0, 2);
+/// How many candidate spots per ledge to sample, and how many ledges to weigh.
+/// A handful is plenty and keeps the per-outing screen sampling cheap.
+const CANDIDATES_PER_LEDGE: u32 = 2;
+const MAX_LEDGES_WEIGHED: usize = 8;
+/// A candidate this busy or calmer is "clear enough" to prefer. Above it is a
+/// wall of text or a grid of icons, taken only if nowhere clearer exists.
+const CALM_ENOUGH: u32 = 50;
+
+/// A roam length in `range`, varied off the frame counter like everything else.
+fn roam_count(roll: u32, range: (u32, u32)) -> u32 {
+    let span = (range.1 - range.0 + 1).max(1);
+    range.0 + (roll.wrapping_mul(2_654_435_761) >> 8) % span
+}
+
+/// Choose the next place to travel to: a *random* other surface, preferring a
+/// calm one.
 ///
-/// Used when a walk is asked for rather than chosen: the destination is not
-/// interesting, the journey is, so he heads for the end of his own ledge.
-fn far_end(
+/// Deliberately random rather than "the best spot". Always picking the highest
+/// score made him lock onto the two best surfaces and instant-transmit back and
+/// forth between them; scattering across every clear candidate is what makes a
+/// multi-teleport session land in different places each time. `avoid` lists the
+/// surfaces he is on and just left, so an outing never goes nowhere and never
+/// bounces straight back. `bias` steers a told walk toward the way he was asked.
+fn pick_destination(
     companion: &Companion,
-    dir: stroll::Facing,
+    walker_h: u32,
+    from_x: i32,
+    avoid: &[String],
+    bias: Option<stroll::Facing>,
+    roll: u32,
 ) -> Option<(String, i32, i32)> {
     let ledges = companion.ledges();
-    let (x, _) = companion.position();
+    if ledges.is_empty() {
+        return None;
+    }
     let (w, _) = companion.size();
-    let centre = x + w / 2;
-    let here = ledges
-        .iter()
-        .find(|l| (l.left..=l.right).contains(&centre))
-        .or_else(|| ledges.last())?;
-    let target = match dir {
-        stroll::Facing::Left => here.left + w / 2,
-        stroll::Facing::Right => here.right - w / 2,
-    };
-    Some((
-        here.title.clone(),
-        target - w / 2,
-        here.top - companion.feet_offset(),
-    ))
+    let feet = companion.feet_offset();
+    let unit = companion.unit();
+    let body_h = ((walker_h as f64 * unit).round() as i32).max(1);
+    let from_centre = from_x + w / 2;
+
+    // Gather candidate standing spots, skipping where he is and where he just
+    // was, and (for a told walk) spots the wrong way.
+    let mut cands: Vec<(String, i32, i32, u32)> = Vec::new(); // title, x, y, busy
+    for (li, l) in ledges.iter().take(MAX_LEDGES_WEIGHED).enumerate() {
+        if avoid.iter().any(|a| a == &l.title) {
+            continue;
+        }
+        for c in 0..CANDIDATES_PER_LEDGE {
+            let salt = roll.wrapping_add(li as u32 * 101 + c * 9973);
+            let target_cx = stroll::spot_on(l, from_centre, w / 2, salt);
+            let target_x = target_cx - w / 2;
+            let target_y = l.top - feet;
+            if let Some(dir) = bias {
+                let wanted_right = dir == stroll::Facing::Right;
+                let going_right = target_cx > from_centre;
+                if wanted_right != going_right && (target_cx - from_centre).abs() > w {
+                    continue;
+                }
+            }
+            let busy = companion.region_busyness(target_x, target_y + feet - body_h, w, body_h);
+            cands.push((l.title.clone(), target_x, target_y, busy));
+        }
+    }
+    if cands.is_empty() {
+        // Everything was avoided, or a bias left nothing that way. Relax and try
+        // again so he still goes somewhere rather than freezing.
+        if !avoid.is_empty() || bias.is_some() {
+            return pick_destination(companion, walker_h, from_x, &[], None, roll);
+        }
+        return None;
+    }
+    // Prefer the clear spots, but never refuse to move just because everything
+    // on screen is busy.
+    let calm: Vec<_> = cands.iter().filter(|c| c.3 <= CALM_ENOUGH).cloned().collect();
+    let pool = if calm.is_empty() { &cands } else { &calm };
+    // Random within the pool — this is the anti-ping-pong: not always the same
+    // "best" spot.
+    let idx = (roll.wrapping_mul(2_654_435_761) >> 8) as usize % pool.len();
+    let (t, x, y, busy) = pool[idx].clone();
+    tracing::debug!("wander: chose {t:?} at x={x} (busy {busy}, {} candidates)", pool.len());
+    Some((t, x, y))
 }
 
 /// How tall he is drawn, in art pixels, taken from the walk art itself.
@@ -893,6 +1264,7 @@ fn handle_effect(
     mind: &Arc<Mind>,
     voice: &Arc<Voice>,
     ear: &Arc<Ear>,
+    nudge: &Arc<Mutex<Option<stroll::Facing>>>,
     hour: u8,
     e: &Effect,
 ) {
@@ -902,6 +1274,7 @@ fn handle_effect(
             rt.clone(),
             mind.clone(),
             voice.clone(),
+            nudge.clone(),
             event.clone(),
             text.clone(),
         ),
@@ -965,6 +1338,19 @@ fn on_menu(app: &AppHandle, id: &str) {
                 tracing::info!("animation test: walking {dir:?} across the screen");
                 return;
             }
+            // Instant transmission: send him *somewhere else*. Wake him if
+            // needed (the wander loop, which owns the teleport, won't act while
+            // he's asleep) and hand the loop the request — it picks a fresh spot,
+            // vanishes him, jumps, reappears, and settles.
+            if name == "teleport" {
+                if state.rt.lock().engine.is_asleep() {
+                    let _ = state.rt.lock().engine.wake_up();
+                }
+                *state.teleport_req.lock() = true;
+                journal::did("instant transmission asked for from the test menu");
+                tracing::info!("animation test: instant transmission requested");
+                return;
+            }
             let mut guard = state.rt.lock();
             // Wake him first: asleep, the sleep clip owns the base and
             // whatever was asked for would never be seen.
@@ -986,6 +1372,7 @@ fn on_menu(app: &AppHandle, id: &str) {
             app.exit(0)
         }
         "center" => open_control_center(app),
+        "sprite_studio" => open_sprite_studio(app),
         // Opening it mid-session is useful precisely because the file is
         // written as it happens: what he just said is already in there.
         "journal" => match journal::path() {
@@ -1079,6 +1466,71 @@ fn open_control_center(app: &AppHandle) {
     .build();
 }
 
+/// The dev-only Sprite Studio window (gated by `DESKFOLK_DEV=1` / debug builds).
+fn open_sprite_studio(app: &AppHandle) {
+    if let Some(w) = app.get_webview_window("sprite-studio") {
+        let _ = w.show();
+        let _ = w.set_focus();
+        return;
+    }
+    let built = WebviewWindowBuilder::new(
+        app,
+        "sprite-studio",
+        WebviewUrl::App("spritestudio.html".into()),
+    )
+    .title("Sprite Studio (dev)")
+    .inner_size(1180.0, 780.0)
+    .min_inner_size(900.0, 600.0)
+    .build();
+    if let Err(e) = built {
+        tracing::error!("could not open Sprite Studio: {e}");
+    }
+}
+
+/// A hidden, webview-less window that exists only to keep the app alive.
+///
+/// Tauri exits when its last *window* closes, but the companion is a native
+/// window it never counts — so a run that only shows the wizard, or opens and
+/// closes the Control Center, would otherwise exit and take him down. This keeps
+/// the window count at one so those closes are ordinary and the app persists;
+/// only an explicit Quit (`app.exit`) ends it.
+fn create_keepalive(app: &AppHandle) {
+    // A hidden webview (the plain `WindowBuilder` is behind an unstable feature).
+    // Its page never shows, so what it loads does not matter — the window merely
+    // needs to exist.
+    let built = WebviewWindowBuilder::new(app, "keepalive", WebviewUrl::App("index.html".into()))
+        .title("")
+        .visible(false)
+        .skip_taskbar(true)
+        .inner_size(1.0, 1.0)
+        .build();
+    if let Err(e) = built {
+        tracing::warn!("could not create the keepalive window: {e}");
+    }
+}
+
+/// The first-run onboarding window: a small, frameless, centered page with its
+/// own titlebar (the design's `760×540`). It writes settings and boots the
+/// companion itself when the user finishes, so we do not boot him behind it.
+fn open_wizard(app: &AppHandle) {
+    if let Some(w) = app.get_webview_window("wizard") {
+        let _ = w.show();
+        let _ = w.set_focus();
+        return;
+    }
+    let built = WebviewWindowBuilder::new(app, "wizard", WebviewUrl::App("wizard.html".into()))
+        .title("Meet Yasser")
+        .inner_size(760.0, 540.0)
+        .decorations(false)
+        .resizable(false)
+        .center()
+        .always_on_top(true)
+        .build();
+    if let Err(e) = built {
+        tracing::error!("could not open the wizard: {e}");
+    }
+}
+
 fn local_hour() -> u8 {
     use chrono::Timelike;
     chrono::Local::now().hour() as u8
@@ -1118,6 +1570,60 @@ fn hotkey_label() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_roam_stays_within_its_bounds() {
+        // An outing is several hops, never zero (which would be no walk) and
+        // never a runaway.
+        for range in [ROAM_TOLD, ROAM_AUTO] {
+            for roll in 0..500u32 {
+                let n = roam_count(roll, range);
+                assert!(range.0 <= n && n <= range.1, "{n} outside {range:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_told_walk_wanders_after_arriving() {
+        // A told walk travels somewhere, then walks that spot at least once
+        // before settling — not "arrive and freeze".
+        assert!(ROAM_TOLD.0 >= 1 && ROAM_TOLD.1 >= ROAM_TOLD.0);
+        assert!(ROAM_AUTO.1 >= ROAM_AUTO.0, "auto range is well-formed");
+    }
+
+    #[test]
+    fn a_teleport_half_matches_its_clip_length() {
+        // The loop times the disappearance itself, so these must equal the
+        // frame counts in character.json (a: 6 a half, b: 8).
+        assert_eq!(Teleport::half_ms('a'), 6 * TP_FRAME_MS);
+        assert_eq!(Teleport::half_ms('b'), 8 * TP_FRAME_MS);
+    }
+
+    #[test]
+    fn teleport_clips_are_named_per_sheet_half_and_facing() {
+        let tp = |sheet, face| Teleport {
+            sheet,
+            face,
+            phase: TeleportPhase::Vanish,
+            left_ms: 0,
+            dest: (0, 0),
+            on: String::new(),
+        };
+        use stroll::Facing::{Left, Right};
+        // Facing right is the art as drawn; left plays the mirrored `_l` clips.
+        assert_eq!(tp('a', Right).out_clip(), "teleport_out_a");
+        assert_eq!(tp('a', Left).out_clip(), "teleport_out_a_l");
+        assert_eq!(tp('a', Left).in_clip(), "teleport_in_a_l");
+        assert_eq!(tp('b', Right).in_clip(), "teleport_in_b");
+        assert_eq!(tp('b', Left).out_clip(), "teleport_out_b_l");
+    }
+
+    #[test]
+    fn only_a_real_level_change_teleports() {
+        // Shuffling along one ledge stays a walk; anything a window's height
+        // apart is an instant transmission.
+        assert!(TELEPORT_IF_DY_OVER > 0 && TELEPORT_IF_DY_OVER < 60);
+    }
 
     #[test]
     fn animation_ids_round_trip_through_the_menu() {

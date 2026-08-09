@@ -18,6 +18,7 @@ use serde::{Deserialize, Serialize};
 mod clip;
 pub mod hit;
 pub mod layout;
+pub mod modular;
 pub use clip::{ClipPlayer, Frame};
 pub use hit::{hit_test, Portal};
 pub use layout::{compose, Composition, Placed, Rect, SpriteDims};

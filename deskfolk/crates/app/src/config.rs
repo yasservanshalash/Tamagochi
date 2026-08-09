@@ -26,6 +26,28 @@ pub const DEFAULT_OPENROUTER_MODEL: &str =
 const OPENROUTER_BASE: &str = "https://openrouter.ai/api/v1";
 const GROQ_BASE: &str = "https://api.groq.com/openai/v1";
 
+/// Resolve the provider from the user's saved settings, falling back to the
+/// environment.
+///
+/// This is the basic/advanced tier: **basic** always runs the bundled local
+/// brain (free, private, no key) via the sidecar; **advanced** uses whatever
+/// provider the user configured in the Control Center. If advanced is selected
+/// but nothing is configured yet, we fall back to environment auto-detection so
+/// he still talks.
+pub fn provider_from_settings(brain: &crate::settings::Brain) -> (ProviderConfig, String) {
+    use crate::settings::Tier;
+    match brain.tier {
+        Tier::Basic => (
+            ProviderConfig::Sidecar { base_url: "http://127.0.0.1:8087".into() },
+            "basic tier: bundled local brain".into(),
+        ),
+        Tier::Advanced => match &brain.provider {
+            Some(p) => (p.clone(), "advanced tier: your own provider".into()),
+            None => resolve_provider(),
+        },
+    }
+}
+
 /// Resolve the provider, and return a human-readable reason for the choice so
 /// startup logs explain themselves.
 pub fn resolve_provider() -> (ProviderConfig, String) {
@@ -183,6 +205,13 @@ fn ollama(get: &impl Fn(&str) -> Option<String>, model: Option<String>) -> Provi
 
 /// Process environment overlaid on any `.env` files we can find. Real env vars
 /// win, so a shell override always beats a file.
+/// Look up a value from the merged `.env` files (real environment wins), e.g.
+/// the shared `OPENROUTER_API_KEY` in `brain/.env`. Dev tools that need a
+/// secret at command time use this rather than re-parsing `.env` themselves.
+pub fn secret(key: &str) -> Option<String> {
+    load_env().get(key).cloned()
+}
+
 fn load_env() -> BTreeMap<String, String> {
     let mut merged = BTreeMap::new();
     for path in env_file_candidates() {

@@ -96,6 +96,32 @@ for said in [
 ]:
     check(f"not a command: {said!r}", ts.music_intent(said), None)
 
+# --- body intent ------------------------------------------------------------
+# The counterpart to music_intent: a told-to movement, matched deterministically
+# so "take a walk" moves him even when the model forgets to fill the field.
+for said, want in [
+    ("walk", "walk"),
+    ("Walk!", "walk"),
+    ("yo walk", "walk"),
+    ("move", "walk"),
+    ("get moving", "walk"),
+    ("yo take a walk", "walk"),
+    ("go for a stroll man", "walk"),
+    ("walk around a bit", "walk"),
+    ("stretch your legs", "walk"),
+    ("walk to the left", "walk_left"),
+    ("go right", "walk_right"),
+    ("walk right", "walk_right"),
+    ("go to sleep", "sleep"),
+    ("take a nap bro", "sleep"),
+]:
+    check(f"body: {said!r}", ts.body_intent(said), want)
+
+# Talking *about* moving, or not about it at all, must not set him off.
+for said in ["do you ever take walks", "what do you think about sleep",
+             "tell me about your day", "play some music", ""]:
+    check(f"not a body command: {said!r}", ts.body_intent(said), None)
+
 # --- extract_json -----------------------------------------------------------
 # Throwing away a real answer is worse than a refusal: it reads as censorship
 # that was never there. Two of five research questions failed exactly so.

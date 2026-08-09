@@ -30,21 +30,23 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetCursorPos,
     GetMessageW, GetWindowLongPtrW, LoadCursorW, PostMessageW, PostQuitMessage, RegisterClassW,
-    SetWindowLongPtrW, SetWindowPos, ShowWindow, SystemParametersInfoW, TranslateMessage,
+    SetTimer, SetWindowLongPtrW, SetWindowPos, ShowWindow, SystemParametersInfoW, TranslateMessage,
     GWLP_USERDATA, HWND_TOPMOST, IDC_ARROW, MA_NOACTIVATE, MSG, SPI_GETWORKAREA, SWP_NOACTIVATE,
     SWP_NOMOVE, SWP_NOSIZE, SW_HIDE, SW_SHOWNOACTIVATE, WM_APP, WM_CLOSE, WM_DESTROY,
     WM_DISPLAYCHANGE, WM_DPICHANGED, WM_HOTKEY, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEACTIVATE,
-    WM_MOUSEMOVE, WM_RBUTTONUP, WNDCLASSW, WS_EX_LAYERED, WS_EX_NOREDIRECTIONBITMAP,
+    WM_MOUSEMOVE, WM_RBUTTONUP, WM_TIMER, WNDCLASSW, WS_EX_LAYERED, WS_EX_NOREDIRECTIONBITMAP,
     WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
 
 use crate::flyout;
 use crate::hotkey;
+use crate::modular_paint::{ModularScene, Overlays};
 use crate::paint;
 use crate::sprites::Sprites;
 use crate::surface::Surface;
 use crate::text::{wide, TextRenderer};
 use crate::{Config, Frame, Host};
+use deskfolk_engine::modular::CharacterState;
 
 /// A frame is waiting in `Shared::pending`.
 const WM_FRAME: u32 = WM_APP + 1;
@@ -53,6 +55,10 @@ const WM_QUIT_COMPANION: u32 = WM_APP + 2;
 /// He was moved by something other than a drag — a walk, or a ledge shifting
 /// under him. Position changed, the frame did not.
 const WM_MOVED: u32 = WM_APP + 3;
+/// Drives modular animation at a steady rate, independent of engine frames
+/// (which are change-gated and stop arriving when he's idle).
+const ANIM_TIMER_ID: usize = 1;
+const ANIM_MS: u32 = 66; // ~15 fps
 
 const CLASS_NAME: &str = "DeskfolkCompanion";
 static REGISTER: Once = Once::new();
@@ -102,6 +108,28 @@ struct WindowState {
     drag: Option<Drag>,
     shown: bool,
     last: Option<Frame>,
+    /// Dev-only modular render path (behind `DESKFOLK_MODULAR=1`). When present,
+    /// the window assembles this character from parts instead of drawing the
+    /// classic single-sprite frame.
+    modular: Option<ModularScene>,
+    modular_state: Option<CharacterState>,
+    /// Modular animation clock + derived idle-bob offset (art units), and the
+    /// latest engine signals the driver reacts to (speaking, loudness).
+    anim_tick: u32,
+    bob: i32,
+    blink_ticks: u32,
+    spk_speaking: bool,
+    spk_level: u8,
+    /// Walk state, inferred from the window's own position deltas (he's moved by
+    /// `move_to`), so no engine plumbing is needed for facing/locomotion.
+    facing_left: bool,
+    /// Whether to mirror the sprite this frame. The side art faces LEFT
+    /// natively, so we flip only when he walks to the RIGHT.
+    flip: bool,
+    walking: bool,
+    walk_phase: u32,
+    last_x: i32,
+    still_ticks: u32,
 }
 
 impl WindowState {
@@ -130,19 +158,29 @@ impl WindowState {
     }
 
     fn repaint(&mut self, hwnd: HWND) {
-        let Some(frame) = self.last.clone() else { return };
+        // Modular dev path assembles from parts and needs no incoming frame; the
+        // classic path draws the last frame it was sent.
+        let modular = self.modular.is_some();
+        if !modular && self.last.is_none() {
+            return;
+        }
         let Some(surface) = self.surface.as_mut() else { return };
         {
             let mut canvas = surface.canvas();
-            paint::paint(
-                &mut canvas,
-                &self.sprites,
-                self.text.as_mut(),
-                &frame,
-                &self.stage,
-                self.portal,
-                self.unit,
-            );
+            if let (Some(scene), Some(st)) = (self.modular.as_ref(), self.modular_state.as_ref()) {
+                canvas.clear();
+                scene.paint(&mut canvas, st, self.unit, Overlays::default(), self.bob, self.flip);
+            } else if let Some(frame) = self.last.as_ref() {
+                paint::paint(
+                    &mut canvas,
+                    &self.sprites,
+                    self.text.as_mut(),
+                    frame,
+                    &self.stage,
+                    self.portal,
+                    self.unit,
+                );
+            }
         }
         let (x, y) = (
             self.shared.x.load(Ordering::Relaxed),
@@ -164,6 +202,70 @@ impl WindowState {
                 self.size.1,
                 self.unit
             );
+        }
+    }
+
+    /// Advance the modular animation one timer tick: idle bob, periodic blink,
+    /// and a talk mouth-flap while speaking. Mutates `modular_state`; a no-op
+    /// unless the modular path is active.
+    fn tick_anim(&mut self) {
+        if self.modular.is_none() {
+            return;
+        }
+        self.anim_tick = self.anim_tick.wrapping_add(1);
+        let t = self.anim_tick;
+
+        // Infer walk state from the window's own horizontal motion.
+        let x = self.shared.x.load(Ordering::Relaxed);
+        let dx = x - self.last_x;
+        self.last_x = x;
+        if dx.abs() >= 1 {
+            self.walking = true;
+            self.still_ticks = 0;
+            if dx < 0 {
+                self.facing_left = true;
+            } else if dx > 0 {
+                self.facing_left = false;
+            }
+        } else {
+            self.still_ticks = self.still_ticks.saturating_add(1);
+            if self.still_ticks > 3 {
+                self.walking = false;
+            }
+        }
+
+        // Choose the pose (compute into locals first to avoid overlapping borrows).
+        let head: String;
+        let torso: String;
+        let leg: String;
+        if self.walking {
+            self.bob = 0;
+            self.flip = false; // classic frames are already directional
+            self.walk_phase = self.walk_phase.wrapping_add(1);
+            // Real walk: play the classic 8-frame directional cycle as a full
+            // body on the torso slot, and hide the modular head/legs so only
+            // that frame shows. ~7 ticks/frame reads as a relaxed amble.
+            let dir = if self.facing_left { 'l' } else { 'r' };
+            let n = (self.walk_phase / 3) % 8;
+            head = "without_head".to_string();
+            torso = format!("walk{dir}{n}");
+            leg = "without_leg".to_string();
+        } else {
+            // Idle: face forward (never mirrored), gentle breathing bob.
+            self.flip = false;
+            const BOB: [i32; 8] = [0, 0, -1, -1, -2, -1, -1, 0];
+            self.bob = BOB[((t / 3) % 8) as usize];
+            // Blink/talk head swaps need their own sliced heads; until those
+            // exist in the sheet set, hold the neutral front head so a missing
+            // variant can never blank the face.
+            head = "front".to_string();
+            torso = "idle_front".to_string();
+            leg = "stand".to_string();
+        }
+        if let Some(st) = self.modular_state.as_mut() {
+            st.variants.insert("head_base".to_string(), head);
+            st.variants.insert("torso".to_string(), torso);
+            st.variants.insert("left_leg".to_string(), leg);
         }
     }
 }
@@ -219,6 +321,7 @@ pub(crate) struct Spawned {
 pub(crate) fn spawn(
     config: Config,
     sprites: Sprites,
+    modular: Option<ModularScene>,
     host: Arc<dyn Host>,
 ) -> Result<Spawned, String> {
     let shared = Arc::new(Shared {
@@ -249,29 +352,67 @@ pub(crate) fn spawn(
                 unsafe { hotkey::register(hwnd, spec) };
             }
 
+            // In modular mode the character is authored on the 320×320 canvas,
+            // so the window is sized to that and starts in the canonical pose.
+            let modular_state = modular
+                .as_ref()
+                .map(|s| CharacterState::canonical_yasser(&s.definition));
+            let mut stage = config.stage;
+            let mut scale = config.scale;
+            if modular.is_some() {
+                stage.width = 320;
+                stage.height = 320;
+                // The sheet-sliced character is ~300 art units tall — about the
+                // same as the classic 292px sprite — so the classic scale keeps
+                // him the same on-screen size. Override with DESKFOLK_MODULAR_SCALE.
+                scale = std::env::var("DESKFOLK_MODULAR_SCALE")
+                    .ok()
+                    .and_then(|s| s.parse::<f64>().ok())
+                    .unwrap_or(scale);
+            }
+
             let mut state = Box::new(WindowState {
                 shared: thread_shared,
                 sprites,
                 surface: None,
                 text: None,
-                stage: config.stage,
+                stage,
                 portal: config.portal,
-                scale: config.scale,
+                scale,
                 name: config.name.clone(),
                 pixel_snap: config.pixel_snap,
-                unit: config.scale,
+                unit: scale,
                 size: (0, 0),
                 drag: None,
                 shown: false,
                 last: None,
+                modular,
+                modular_state,
+                anim_tick: 0,
+                bob: 0,
+                blink_ticks: 0,
+                spk_speaking: false,
+                spk_level: 0,
+                facing_left: false,
+                flip: false,
+                walking: false,
+                walk_phase: 0,
+                last_x: 0,
+                still_ticks: 99,
             });
             state.resize_for_dpi(hwnd);
             let (x, y) = default_position(state.size.0, state.size.1);
             state.shared.x.store(x, Ordering::Relaxed);
             state.shared.y.store(y, Ordering::Relaxed);
+            let animate = state.modular.is_some();
 
             unsafe {
                 SetWindowLongPtrW(hwnd, GWLP_USERDATA, Box::into_raw(state) as isize);
+                // Modular characters animate on their own clock, since engine
+                // frames stop arriving when he's idle.
+                if animate {
+                    SetTimer(hwnd, ANIM_TIMER_ID, ANIM_MS, None);
+                }
             }
             let _ = tx.send(Ok(hwnd as isize));
 
@@ -362,11 +503,28 @@ unsafe extern "system" fn wndproc(
             if let Some(state) = state_of(hwnd) {
                 state.shared.queued.store(false, Ordering::SeqCst);
                 if let Some(frame) = state.shared.pending.lock().ok().and_then(|mut p| p.take()) {
+                    // Feed engine signals to the modular animation driver.
+                    state.spk_speaking = frame.speaking;
+                    state.spk_level = frame.level;
                     state.last = Some(frame);
                 }
-                state.repaint(hwnd);
+                // The modular path repaints on its own animation timer; the
+                // classic path repaints once per delivered frame.
+                if state.modular.is_none() {
+                    state.repaint(hwnd);
+                }
             }
             return 0;
+        }
+
+        WM_TIMER => {
+            if wparam == ANIM_TIMER_ID {
+                if let Some(state) = state_of(hwnd) {
+                    state.tick_anim();
+                    state.repaint(hwnd);
+                }
+                return 0;
+            }
         }
 
         WM_LBUTTONDOWN => {

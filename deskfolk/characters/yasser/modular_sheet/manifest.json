@@ -1,0 +1,605 @@
+{
+  "definition_id": "deskfolk_yasser_modular_v1",
+  "instances": [
+    {
+      "id": "head_base/front",
+      "slot": "head_base",
+      "variant": "front",
+      "view": "front",
+      "source": "sheets/head_front.png",
+      "region": {
+        "x": 0,
+        "y": 0,
+        "w": 186,
+        "h": 100
+      },
+      "canonical_bounds": {
+        "x": 87,
+        "y": 10,
+        "width": 146,
+        "height": 78
+      },
+      "pivot": [
+        160,
+        105
+      ],
+      "angle": 0,
+      "mirror_ok": false
+    },
+    {
+      "id": "torso/idle_front",
+      "slot": "torso",
+      "variant": "idle_front",
+      "view": "front",
+      "source": "sheets/torso_front.png",
+      "region": {
+        "x": 0,
+        "y": 0,
+        "w": 186,
+        "h": 150
+      },
+      "canonical_bounds": {
+        "x": 87,
+        "y": 88,
+        "width": 146,
+        "height": 117
+      },
+      "pivot": [
+        160,
+        143
+      ],
+      "angle": 0,
+      "mirror_ok": false
+    },
+    {
+      "id": "left_leg/stand",
+      "slot": "left_leg",
+      "variant": "stand",
+      "view": "front",
+      "source": "sheets/legs_front.png",
+      "region": {
+        "x": 0,
+        "y": 0,
+        "w": 186,
+        "h": 133
+      },
+      "canonical_bounds": {
+        "x": 87,
+        "y": 206,
+        "width": 146,
+        "height": 104
+      },
+      "pivot": [
+        145,
+        207
+      ],
+      "angle": 0,
+      "mirror_ok": false
+    },
+    {
+      "id": "head_base/side",
+      "slot": "head_base",
+      "variant": "side",
+      "view": "front",
+      "source": "sheets/head_side.png",
+      "region": {
+        "x": 0,
+        "y": 0,
+        "w": 129,
+        "h": 100
+      },
+      "canonical_bounds": {
+        "x": 110,
+        "y": 10,
+        "width": 101,
+        "height": 78
+      },
+      "pivot": [
+        160,
+        105
+      ],
+      "angle": 0,
+      "mirror_ok": false
+    },
+    {
+      "id": "torso/side",
+      "slot": "torso",
+      "variant": "side",
+      "view": "front",
+      "source": "sheets/torso_side.png",
+      "region": {
+        "x": 0,
+        "y": 0,
+        "w": 129,
+        "h": 150
+      },
+      "canonical_bounds": {
+        "x": 110,
+        "y": 88,
+        "width": 101,
+        "height": 117
+      },
+      "pivot": [
+        160,
+        143
+      ],
+      "angle": 0,
+      "mirror_ok": false
+    },
+    {
+      "id": "left_leg/side_stand",
+      "slot": "left_leg",
+      "variant": "side_stand",
+      "view": "front",
+      "source": "sheets/legs_side.png",
+      "region": {
+        "x": 0,
+        "y": 0,
+        "w": 129,
+        "h": 133
+      },
+      "canonical_bounds": {
+        "x": 110,
+        "y": 206,
+        "width": 101,
+        "height": 104
+      },
+      "pivot": [
+        145,
+        207
+      ],
+      "angle": 0,
+      "mirror_ok": false
+    },
+    {
+      "id": "head_base/without_head",
+      "slot": "head_base",
+      "variant": "without_head",
+      "view": "front",
+      "source": "sheets/empty_head_base.png",
+      "region": {
+        "x": 0,
+        "y": 0,
+        "w": 1,
+        "h": 1
+      },
+      "canonical_bounds": {
+        "x": 160,
+        "y": 260,
+        "width": 1,
+        "height": 1
+      },
+      "pivot": [
+        160,
+        105
+      ],
+      "angle": 0,
+      "mirror_ok": false
+    },
+    {
+      "id": "left_leg/without_leg",
+      "slot": "left_leg",
+      "variant": "without_leg",
+      "view": "front",
+      "source": "sheets/empty_left_leg.png",
+      "region": {
+        "x": 0,
+        "y": 0,
+        "w": 1,
+        "h": 1
+      },
+      "canonical_bounds": {
+        "x": 160,
+        "y": 260,
+        "width": 1,
+        "height": 1
+      },
+      "pivot": [
+        145,
+        207
+      ],
+      "angle": 0,
+      "mirror_ok": false
+    },
+    {
+      "id": "torso/walkl0",
+      "slot": "torso",
+      "variant": "walkl0",
+      "view": "front",
+      "source": "sheets/walkl0.png",
+      "region": {
+        "x": 0,
+        "y": 0,
+        "w": 146,
+        "h": 291
+      },
+      "canonical_bounds": {
+        "x": 84,
+        "y": 10,
+        "width": 151,
+        "height": 300
+      },
+      "pivot": [
+        160,
+        143
+      ],
+      "angle": 0,
+      "mirror_ok": false
+    },
+    {
+      "id": "torso/walkl1",
+      "slot": "torso",
+      "variant": "walkl1",
+      "view": "front",
+      "source": "sheets/walkl1.png",
+      "region": {
+        "x": 0,
+        "y": 0,
+        "w": 146,
+        "h": 291
+      },
+      "canonical_bounds": {
+        "x": 84,
+        "y": 10,
+        "width": 151,
+        "height": 300
+      },
+      "pivot": [
+        160,
+        143
+      ],
+      "angle": 0,
+      "mirror_ok": false
+    },
+    {
+      "id": "torso/walkl2",
+      "slot": "torso",
+      "variant": "walkl2",
+      "view": "front",
+      "source": "sheets/walkl2.png",
+      "region": {
+        "x": 0,
+        "y": 0,
+        "w": 146,
+        "h": 291
+      },
+      "canonical_bounds": {
+        "x": 84,
+        "y": 10,
+        "width": 151,
+        "height": 300
+      },
+      "pivot": [
+        160,
+        143
+      ],
+      "angle": 0,
+      "mirror_ok": false
+    },
+    {
+      "id": "torso/walkl3",
+      "slot": "torso",
+      "variant": "walkl3",
+      "view": "front",
+      "source": "sheets/walkl3.png",
+      "region": {
+        "x": 0,
+        "y": 0,
+        "w": 146,
+        "h": 291
+      },
+      "canonical_bounds": {
+        "x": 84,
+        "y": 10,
+        "width": 151,
+        "height": 300
+      },
+      "pivot": [
+        160,
+        143
+      ],
+      "angle": 0,
+      "mirror_ok": false
+    },
+    {
+      "id": "torso/walkl4",
+      "slot": "torso",
+      "variant": "walkl4",
+      "view": "front",
+      "source": "sheets/walkl4.png",
+      "region": {
+        "x": 0,
+        "y": 0,
+        "w": 146,
+        "h": 291
+      },
+      "canonical_bounds": {
+        "x": 84,
+        "y": 10,
+        "width": 151,
+        "height": 300
+      },
+      "pivot": [
+        160,
+        143
+      ],
+      "angle": 0,
+      "mirror_ok": false
+    },
+    {
+      "id": "torso/walkl5",
+      "slot": "torso",
+      "variant": "walkl5",
+      "view": "front",
+      "source": "sheets/walkl5.png",
+      "region": {
+        "x": 0,
+        "y": 0,
+        "w": 146,
+        "h": 291
+      },
+      "canonical_bounds": {
+        "x": 84,
+        "y": 10,
+        "width": 151,
+        "height": 300
+      },
+      "pivot": [
+        160,
+        143
+      ],
+      "angle": 0,
+      "mirror_ok": false
+    },
+    {
+      "id": "torso/walkl6",
+      "slot": "torso",
+      "variant": "walkl6",
+      "view": "front",
+      "source": "sheets/walkl6.png",
+      "region": {
+        "x": 0,
+        "y": 0,
+        "w": 146,
+        "h": 291
+      },
+      "canonical_bounds": {
+        "x": 84,
+        "y": 10,
+        "width": 151,
+        "height": 300
+      },
+      "pivot": [
+        160,
+        143
+      ],
+      "angle": 0,
+      "mirror_ok": false
+    },
+    {
+      "id": "torso/walkl7",
+      "slot": "torso",
+      "variant": "walkl7",
+      "view": "front",
+      "source": "sheets/walkl7.png",
+      "region": {
+        "x": 0,
+        "y": 0,
+        "w": 146,
+        "h": 291
+      },
+      "canonical_bounds": {
+        "x": 84,
+        "y": 10,
+        "width": 151,
+        "height": 300
+      },
+      "pivot": [
+        160,
+        143
+      ],
+      "angle": 0,
+      "mirror_ok": false
+    },
+    {
+      "id": "torso/walkr0",
+      "slot": "torso",
+      "variant": "walkr0",
+      "view": "front",
+      "source": "sheets/walkr0.png",
+      "region": {
+        "x": 0,
+        "y": 0,
+        "w": 146,
+        "h": 291
+      },
+      "canonical_bounds": {
+        "x": 84,
+        "y": 10,
+        "width": 151,
+        "height": 300
+      },
+      "pivot": [
+        160,
+        143
+      ],
+      "angle": 0,
+      "mirror_ok": false
+    },
+    {
+      "id": "torso/walkr1",
+      "slot": "torso",
+      "variant": "walkr1",
+      "view": "front",
+      "source": "sheets/walkr1.png",
+      "region": {
+        "x": 0,
+        "y": 0,
+        "w": 146,
+        "h": 291
+      },
+      "canonical_bounds": {
+        "x": 84,
+        "y": 10,
+        "width": 151,
+        "height": 300
+      },
+      "pivot": [
+        160,
+        143
+      ],
+      "angle": 0,
+      "mirror_ok": false
+    },
+    {
+      "id": "torso/walkr2",
+      "slot": "torso",
+      "variant": "walkr2",
+      "view": "front",
+      "source": "sheets/walkr2.png",
+      "region": {
+        "x": 0,
+        "y": 0,
+        "w": 146,
+        "h": 291
+      },
+      "canonical_bounds": {
+        "x": 84,
+        "y": 10,
+        "width": 151,
+        "height": 300
+      },
+      "pivot": [
+        160,
+        143
+      ],
+      "angle": 0,
+      "mirror_ok": false
+    },
+    {
+      "id": "torso/walkr3",
+      "slot": "torso",
+      "variant": "walkr3",
+      "view": "front",
+      "source": "sheets/walkr3.png",
+      "region": {
+        "x": 0,
+        "y": 0,
+        "w": 146,
+        "h": 291
+      },
+      "canonical_bounds": {
+        "x": 84,
+        "y": 10,
+        "width": 151,
+        "height": 300
+      },
+      "pivot": [
+        160,
+        143
+      ],
+      "angle": 0,
+      "mirror_ok": false
+    },
+    {
+      "id": "torso/walkr4",
+      "slot": "torso",
+      "variant": "walkr4",
+      "view": "front",
+      "source": "sheets/walkr4.png",
+      "region": {
+        "x": 0,
+        "y": 0,
+        "w": 146,
+        "h": 291
+      },
+      "canonical_bounds": {
+        "x": 84,
+        "y": 10,
+        "width": 151,
+        "height": 300
+      },
+      "pivot": [
+        160,
+        143
+      ],
+      "angle": 0,
+      "mirror_ok": false
+    },
+    {
+      "id": "torso/walkr5",
+      "slot": "torso",
+      "variant": "walkr5",
+      "view": "front",
+      "source": "sheets/walkr5.png",
+      "region": {
+        "x": 0,
+        "y": 0,
+        "w": 146,
+        "h": 291
+      },
+      "canonical_bounds": {
+        "x": 84,
+        "y": 10,
+        "width": 151,
+        "height": 300
+      },
+      "pivot": [
+        160,
+        143
+      ],
+      "angle": 0,
+      "mirror_ok": false
+    },
+    {
+      "id": "torso/walkr6",
+      "slot": "torso",
+      "variant": "walkr6",
+      "view": "front",
+      "source": "sheets/walkr6.png",
+      "region": {
+        "x": 0,
+        "y": 0,
+        "w": 146,
+        "h": 291
+      },
+      "canonical_bounds": {
+        "x": 84,
+        "y": 10,
+        "width": 151,
+        "height": 300
+      },
+      "pivot": [
+        160,
+        143
+      ],
+      "angle": 0,
+      "mirror_ok": false
+    },
+    {
+      "id": "torso/walkr7",
+      "slot": "torso",
+      "variant": "walkr7",
+      "view": "front",
+      "source": "sheets/walkr7.png",
+      "region": {
+        "x": 0,
+        "y": 0,
+        "w": 146,
+        "h": 291
+      },
+      "canonical_bounds": {
+        "x": 84,
+        "y": 10,
+        "width": 151,
+        "height": 300
+      },
+      "pivot": [
+        160,
+        143
+      ],
+      "angle": 0,
+      "mirror_ok": false
+    }
+  ]
+}

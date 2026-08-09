@@ -9,7 +9,19 @@ use std::path::PathBuf;
 use tauri::{AppHandle, Manager};
 
 /// Directory holding installed character packages.
+///
+/// In **debug** builds we prefer the in-repo `characters/` source, so every
+/// asset (modular_sheet, flux_pack, sprites the dev tools generate) is present
+/// and edits take effect immediately — a clean build's resource copy is
+/// selective and would otherwise drop them. Packaged **release** builds use the
+/// bundled resource directory.
 pub fn characters_dir(app: &AppHandle) -> PathBuf {
+    if cfg!(debug_assertions) {
+        let ws = workspace_characters();
+        if ws.is_dir() {
+            return ws;
+        }
+    }
     if let Ok(res) = app.path().resource_dir() {
         let bundled = res.join("characters");
         if bundled.is_dir() {

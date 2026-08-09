@@ -1,0 +1,5 @@
+{
+  "definition_id": "deskfolk_yasser_modular_v1",
+  "_note": "Empty by design. The currently generated sheets do not conform to the modular contract (see ASSET_AUDIT.md): they are 1248x832 full-character illustrations with baked labels/shadows, not isolated 320-canvas parts. The web inspector (ui/inspector.html) populates `instances` as conforming parts are curated or regenerated. Until then, `engine::modular::audit` reports every part slot as missing rather than inventing bindings.",
+  "instances": []
+}

@@ -1,0 +1,230 @@
+{
+  "definition_id": "deskfolk_yasser_modular_v1",
+  "instances": [
+    {
+      "id": "left_leg/stand",
+      "slot": "left_leg",
+      "variant": "stand",
+      "view": "front",
+      "source": "sheets/legs_front.png",
+      "region": {
+        "x": 443,
+        "y": 175,
+        "w": 312,
+        "h": 563
+      },
+      "canonical_bounds": {
+        "x": 124,
+        "y": 197,
+        "width": 72,
+        "height": 95
+      },
+      "pivot": [
+        145,
+        207
+      ],
+      "angle": 0,
+      "mirror_ok": false
+    },
+    {
+      "id": "torso/idle_front",
+      "slot": "torso",
+      "variant": "idle_front",
+      "view": "front",
+      "source": "sheets/upper_body_front.png",
+      "region": {
+        "x": 405,
+        "y": 248,
+        "w": 417,
+        "h": 416
+      },
+      "canonical_bounds": {
+        "x": 110,
+        "y": 112,
+        "width": 100,
+        "height": 108
+      },
+      "pivot": [
+        160,
+        143
+      ],
+      "angle": 0,
+      "mirror_ok": false
+    },
+    {
+      "id": "head_base/front",
+      "slot": "head_base",
+      "variant": "front",
+      "view": "front",
+      "source": "sheets/head_front.png",
+      "region": {
+        "x": 359,
+        "y": 142,
+        "w": 496,
+        "h": 548
+      },
+      "canonical_bounds": {
+        "x": 118,
+        "y": 44,
+        "width": 84,
+        "height": 92
+      },
+      "pivot": [
+        160,
+        105
+      ],
+      "angle": 0,
+      "mirror_ok": false
+    },
+    {
+      "id": "head_base/talk",
+      "slot": "head_base",
+      "variant": "talk",
+      "view": "front",
+      "source": "sheets/head_talk.png",
+      "region": {
+        "x": 373,
+        "y": 127,
+        "w": 485,
+        "h": 557
+      },
+      "canonical_bounds": {
+        "x": 118,
+        "y": 44,
+        "width": 84,
+        "height": 92
+      },
+      "pivot": [
+        160,
+        105
+      ],
+      "angle": 0,
+      "mirror_ok": false
+    },
+    {
+      "id": "head_base/blink",
+      "slot": "head_base",
+      "variant": "blink",
+      "view": "front",
+      "source": "sheets/head_blink.png",
+      "region": {
+        "x": 330,
+        "y": 89,
+        "w": 546,
+        "h": 569
+      },
+      "canonical_bounds": {
+        "x": 118,
+        "y": 44,
+        "width": 84,
+        "height": 92
+      },
+      "pivot": [
+        160,
+        105
+      ],
+      "angle": 0,
+      "mirror_ok": false
+    },
+    {
+      "id": "head_base/side",
+      "slot": "head_base",
+      "variant": "side",
+      "view": "front",
+      "source": "sheets/head_side.png",
+      "region": {
+        "x": 415,
+        "y": 142,
+        "w": 459,
+        "h": 522
+      },
+      "canonical_bounds": {
+        "x": 120,
+        "y": 44,
+        "width": 81,
+        "height": 92
+      },
+      "pivot": [
+        160,
+        105
+      ],
+      "angle": 0,
+      "mirror_ok": false
+    },
+    {
+      "id": "torso/side",
+      "slot": "torso",
+      "variant": "side",
+      "view": "front",
+      "source": "sheets/torso_side.png",
+      "region": {
+        "x": 465,
+        "y": 204,
+        "w": 287,
+        "h": 408
+      },
+      "canonical_bounds": {
+        "x": 122,
+        "y": 112,
+        "width": 76,
+        "height": 108
+      },
+      "pivot": [
+        160,
+        143
+      ],
+      "angle": 0,
+      "mirror_ok": false
+    },
+    {
+      "id": "left_leg/walk1",
+      "slot": "left_leg",
+      "variant": "walk1",
+      "view": "front",
+      "source": "sheets/legs_side_walk1.png",
+      "region": {
+        "x": 392,
+        "y": 162,
+        "w": 470,
+        "h": 506
+      },
+      "canonical_bounds": {
+        "x": 116,
+        "y": 197,
+        "width": 88,
+        "height": 95
+      },
+      "pivot": [
+        145,
+        207
+      ],
+      "angle": 0,
+      "mirror_ok": false
+    },
+    {
+      "id": "left_leg/walk2",
+      "slot": "left_leg",
+      "variant": "walk2",
+      "view": "front",
+      "source": "sheets/legs_side_walk2.png",
+      "region": {
+        "x": 370,
+        "y": 194,
+        "w": 461,
+        "h": 427
+      },
+      "canonical_bounds": {
+        "x": 109,
+        "y": 197,
+        "width": 103,
+        "height": 95
+      },
+      "pivot": [
+        145,
+        207
+      ],
+      "angle": 0,
+      "mirror_ok": false
+    }
+  ]
+}

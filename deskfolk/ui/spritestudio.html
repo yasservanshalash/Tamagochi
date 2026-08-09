@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sprite Studio</title>
+    <style>
+      /* Design tokens — shared with the wizard so Sprite Studio feels native. */
+      :root {
+        color-scheme: dark;
+        --bg: #100e13;
+        --panel: #18161b;
+        --panel-2: #1d1a21;
+        --accent: #e8a13c;
+        --accent-hi: #f2b45a;
+        --mood: #e0564e;
+        --online: #57c464;
+        --text: #ece7de;
+        --text-2: #a79f92;
+        --text-3: #6f6a60;
+        --hair: rgba(255, 255, 255, 0.09);
+        --inset: rgba(255, 255, 255, 0.045);
+        --inset-2: rgba(255, 255, 255, 0.07);
+        --sans: "Segoe UI", system-ui, -apple-system, sans-serif;
+        --mono: Consolas, "Cascadia Mono", ui-monospace, monospace;
+      }
+      * { box-sizing: border-box; }
+      html, body {
+        margin: 0; height: 100%; overflow: hidden;
+        background: radial-gradient(120% 120% at 20% -10%, #221d26 0%, #16131a 55%, #100e13 100%);
+        color: var(--text); font: 13px/1.55 var(--sans);
+        user-select: none; -webkit-user-select: none;
+      }
+      .win { display: flex; flex-direction: column; height: 100vh; }
+      .titlebar {
+        height: 46px; flex: 0 0 auto; display: flex; align-items: center;
+        padding: 0 16px; gap: 12px; border-bottom: 1px solid var(--hair);
+      }
+      .brand {
+        font: 600 12px/1 var(--mono); letter-spacing: 0.22em;
+        color: var(--text-3); text-transform: uppercase;
+      }
+      .brand b { color: var(--accent); }
+      .dev-tag {
+        font: 600 10px/1 var(--mono); letter-spacing: 0.14em; text-transform: uppercase;
+        color: var(--mood); border: 1px solid var(--mood); border-radius: 5px;
+        padding: 3px 7px; opacity: 0.85;
+      }
+      .spacer { flex: 1; }
+      /* Segmented set switch */
+      .seg { display: inline-flex; background: var(--inset); border: 1px solid var(--hair); border-radius: 8px; padding: 3px; gap: 3px; }
+      .seg button {
+        font: 600 12px/1 var(--sans); color: var(--text-2); background: transparent;
+        border: 0; border-radius: 6px; padding: 6px 12px; cursor: pointer;
+      }
+      .seg button.on { background: var(--accent); color: #201503; }
+      /* Layout */
+      .body { flex: 1; display: grid; grid-template-columns: 340px 1fr; min-height: 0; }
+      .left { border-right: 1px solid var(--hair); display: flex; flex-direction: column; min-height: 0; }
+      .left .head { padding: 12px 14px 8px; display: flex; align-items: center; gap: 10px; }
+      .left .head .lbl { font: 600 10px/1 var(--mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--text-3); }
+      .search { flex: 1; }
+      input.field, textarea.field {
+        width: 100%; background: var(--inset); border: 1px solid var(--hair); color: var(--text);
+        border-radius: 8px; padding: 8px 10px; font: 13px/1.4 var(--sans); outline: none;
+      }
+      textarea.field { resize: vertical; min-height: 92px; font-family: var(--mono); font-size: 12px; }
+      input.field:focus, textarea.field:focus { border-color: var(--accent); }
+      .grid { overflow: auto; padding: 8px; display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; align-content: start; }
+      .cell {
+        background: var(--panel); border: 1px solid var(--hair); border-radius: 10px; padding: 8px;
+        cursor: pointer; display: flex; flex-direction: column; gap: 6px; transition: border-color .12s;
+      }
+      .cell:hover { border-color: var(--inset-2); }
+      .cell.sel { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+      .thumb {
+        height: 96px; display: grid; place-items: center; border-radius: 7px; overflow: hidden;
+        background:
+          linear-gradient(45deg, #2a2731 25%, transparent 25%, transparent 75%, #2a2731 75%) 0 0/16px 16px,
+          linear-gradient(45deg, #2a2731 25%, #211f27 25%, #211f27 75%, #2a2731 75%) 8px 8px/16px 16px,
+          #262330;
+      }
+      .thumb img { max-width: 100%; max-height: 100%; image-rendering: pixelated; }
+      .cell .name { font: 12px/1.2 var(--mono); color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      /* Catalog: section headers + missing cells + badges */
+      .section { grid-column: 1 / -1; display: flex; align-items: baseline; gap: 8px; padding: 12px 4px 2px; }
+      .section .s-name { font: 600 11px/1 var(--mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); }
+      .section .s-count { font: 11px var(--mono); color: var(--text-3); }
+      .cell.missing .thumb { border: 1px dashed var(--hair); background: var(--inset); }
+      .cell.missing .thumb::after { content: "no sprite"; color: var(--text-3); font: 11px var(--mono); }
+      .badge { position: relative; }
+      .dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; margin-right: 5px; vertical-align: 1px; }
+      .dot.has { background: var(--online); }
+      .dot.miss { background: var(--text-3); }
+      .pack { margin-top: 8px; }
+      .pack summary { cursor: pointer; color: var(--text-2); font: 12px var(--mono); }
+      .pack pre { white-space: pre-wrap; background: var(--inset); border: 1px solid var(--hair); border-radius: 8px; padding: 10px; color: var(--text-2); font: 11px/1.5 var(--mono); max-height: 260px; overflow: auto; }
+      /* Builder: stage + layer controls */
+      .stage {
+        display: grid; place-items: center; padding: 16px; border-bottom: 1px solid var(--hair);
+        background:
+          linear-gradient(45deg, #17151b 25%, transparent 25%, transparent 75%, #17151b 75%) 0 0/20px 20px,
+          linear-gradient(45deg, #17151b 25%, #131117 25%, #131117 75%, #17151b 75%) 10px 10px/20px 20px,
+          #15131a;
+      }
+      .stage canvas { image-rendering: pixelated; border-radius: 10px; background: transparent; box-shadow: 0 8px 30px rgba(0,0,0,0.4); }
+      /* Span the full left pane (it lives inside the 2-col sprite grid). */
+      .layers { grid-column: 1 / -1; width: 100%; padding: 4px 12px 12px; }
+      .layers .lrow { display: grid; grid-template-columns: 104px minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 5px 0; border-bottom: 1px solid var(--inset); }
+      .layers .lrow:last-child { border-bottom: 0; }
+      .layers .lrow .slot { font: 11px/1.25 var(--mono); color: var(--text-2); text-transform: capitalize; }
+      .layers .lrow.empty .slot { color: var(--text-3); }
+      .layers select.field { width: 100%; min-width: 0; padding: 6px 8px; }
+      .layers .try { font: 11px var(--mono); color: var(--online); white-space: nowrap; }
+      .layers .lrow .hint { white-space: nowrap; }
+      .builder-body { display: grid; grid-template-rows: 1fr auto; min-height: 0; }
+      .toolbar { display: flex; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--hair); align-items: center; }
+      .toolbar .hint { margin-left: auto; }
+      /* Right detail pane */
+      .right { overflow: auto; padding: 18px 20px; display: flex; flex-direction: column; gap: 14px; }
+      .empty { margin: auto; color: var(--text-3); text-align: center; }
+      .card { background: var(--panel); border: 1px solid var(--hair); border-radius: 12px; padding: 14px 16px; }
+      .card h3 { margin: 0 0 10px; font: 600 11px/1 var(--mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--text-3); }
+      .cur { display: flex; gap: 16px; align-items: center; }
+      .cur .thumb { width: 150px; height: 150px; flex: 0 0 auto; }
+      .cur .meta { color: var(--text-2); font: 12px/1.6 var(--mono); }
+      .cur .meta b { color: var(--text); }
+      .swatches { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 4px; }
+      .sw { width: 16px; height: 16px; border-radius: 4px; border: 1px solid var(--hair); }
+      .row { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+      .btn {
+        font: 600 13px/1 var(--sans); border: 1px solid var(--hair); background: var(--inset);
+        color: var(--text); border-radius: 8px; padding: 9px 14px; cursor: pointer;
+      }
+      .btn:hover { border-color: var(--inset-2); }
+      .btn.primary { background: var(--accent); color: #201503; border-color: transparent; }
+      .btn.primary:disabled { opacity: 0.5; cursor: default; }
+      .btn.ghost { background: transparent; }
+      .count { display: inline-flex; align-items: center; gap: 6px; color: var(--text-2); font: 12px var(--mono); }
+      .count input { width: 46px; }
+      .cands { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+      .cand { background: var(--panel-2); border: 1px solid var(--hair); border-radius: 10px; padding: 8px; display: flex; flex-direction: column; gap: 8px; }
+      .cand .thumb { height: 150px; }
+      .alert { border-radius: 8px; padding: 9px 12px; font: 12px/1.5 var(--mono); }
+      .alert.err { background: rgba(224, 86, 78, 0.12); border: 1px solid rgba(224, 86, 78, 0.4); color: #f0a59f; }
+      .alert.ok { background: rgba(87, 196, 100, 0.12); border: 1px solid rgba(87, 196, 100, 0.4); color: #a9e6b0; }
+      .spin { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--text-3); border-top-color: var(--accent); border-radius: 50%; animation: sp 0.8s linear infinite; vertical-align: -2px; }
+      @keyframes sp { to { transform: rotate(360deg); } }
+      .hint { color: var(--text-3); font: 11px/1.5 var(--sans); }
+    </style>
+  </head>
+  <body>
+    <div class="win">
+      <div class="titlebar">
+        <span class="brand">Deskfolk · <b>Sprite Studio</b></span>
+        <span class="dev-tag">dev</span>
+        <span class="spacer"></span>
+        <div class="seg" id="setSeg">
+          <button data-set="classic" class="on">Classic set</button>
+          <button data-set="modular">Modular parts</button>
+          <button data-set="batches">Batches (sheets)</button>
+          <button data-set="builder">Builder</button>
+        </div>
+      </div>
+      <div class="body">
+        <div class="left">
+          <div class="head">
+            <span class="lbl" id="leftLbl">Sprites</span>
+            <span class="search" id="searchWrap"><input id="search" class="field" placeholder="filter…" /></span>
+          </div>
+          <div class="grid" id="grid"></div>
+        </div>
+        <div class="right" id="detail">
+          <div class="empty">Pick a sprite on the left to regenerate it.</div>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="/src/spritestudio/main.ts"></script>
+  </body>
+</html>

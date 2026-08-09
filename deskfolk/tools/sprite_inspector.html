@@ -1,0 +1,1412 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Deskfolk — Modular Sprite Inspector</title>
+<style>
+  :root {
+    --bg: #14131a; --panel: #1c1a22; --card: #24222c; --line: rgba(255,255,255,.09);
+    --ink: #ece7de; --dim: #a79f92; --faint: #6f6a60; --accent: #e8a13c; --hi: #f2b45a;
+    --ok: #57c464; --warn: #e0564e; --mono: Consolas, "Cascadia Mono", monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink);
+    font: 13px/1.5 "Segoe UI", system-ui, sans-serif; }
+  h1 { font-size: 15px; margin: 0; font-weight: 600; }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--dim);
+    margin: 0 0 8px; font-weight: 600; }
+  .app { display: grid; grid-template-columns: 320px 1fr 300px; grid-template-rows: 48px 1fr;
+    height: 100%; }
+  header { grid-column: 1 / -1; display: flex; align-items: center; gap: 14px;
+    padding: 0 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  header .status { margin-left: auto; color: var(--dim); font-size: 12px; }
+  header .status b { color: var(--ink); }
+  .col { overflow-y: auto; padding: 14px; }
+  .col.left { border-right: 1px solid var(--line); background: var(--panel); }
+  .col.right { border-left: 1px solid var(--line); background: var(--panel); }
+  .stage { display: flex; flex-direction: column; align-items: center; gap: 10px;
+    padding: 16px; overflow: auto; }
+  button, select, label.file { font: inherit; color: var(--ink); background: var(--card);
+    border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; cursor: pointer; }
+  button:hover, label.file:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); color: #1a1206; border-color: var(--accent);
+    font-weight: 600; }
+  button.ghost { background: transparent; }
+  input[type=file] { display: none; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .row + .row { margin-top: 8px; }
+  .sheets { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+  .sheet-item { display: flex; align-items: center; gap: 8px; padding: 6px 8px;
+    background: var(--card); border: 1px solid var(--line); border-radius: 8px; font-size: 12px; }
+  .sheet-item.active { border-color: var(--accent); }
+  .sheet-item .name { flex: 1; font-family: var(--mono); overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; }
+  .sheet-item .dim { color: var(--faint); font-size: 11px; }
+  .cellgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+    gap: 6px; margin-top: 10px; }
+  .cell { position: relative; background: var(--card); border: 1px solid var(--line);
+    border-radius: 8px; padding: 4px; cursor: pointer; }
+  .cell.assigned { border-color: var(--ok); }
+  .cell.sel { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+  .cell canvas { width: 100%; display: block; image-rendering: pixelated;
+    background: repeating-conic-gradient(#2a2833 0% 25%, #201e28 0% 50%) 50%/12px 12px; border-radius: 4px; }
+  .cell .tag { position: absolute; top: 3px; left: 3px; right: 3px; font-size: 10px;
+    font-family: var(--mono); color: var(--ok); text-shadow: 0 1px 2px #000;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #preview { image-rendering: pixelated; background:
+    repeating-conic-gradient(#211f29 0% 25%, #1b1922 0% 50%) 50%/16px 16px;
+    border: 1px solid var(--line); border-radius: 10px; }
+  .field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+  .field label { font-size: 11px; color: var(--dim); text-transform: uppercase; letter-spacing: .05em; }
+  .checks { display: flex; flex-direction: column; gap: 6px; }
+  .checks label { display: flex; align-items: center; gap: 8px; font-size: 12px; cursor: pointer; }
+  .note { color: var(--faint); font-size: 11px; margin-top: 6px; line-height: 1.45; }
+  .pill { font-family: var(--mono); font-size: 11px; padding: 1px 6px; border-radius: 999px;
+    background: var(--card); border: 1px solid var(--line); }
+  .missing { color: var(--warn); }
+  .present { color: var(--ok); }
+  hr { border: none; border-top: 1px solid var(--line); margin: 14px 0; }
+  .coverage { font-family: var(--mono); font-size: 11px; line-height: 1.7; }
+  .coverage .slot { display: flex; justify-content: space-between; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>Modular Sprite Inspector</h1>
+    <span class="pill" id="defName">no definition</span>
+    <label class="file">Load definition.json<input type="file" id="defInput" accept=".json"></label>
+    <label class="file">Load sheets…<input type="file" id="sheetInput" accept="image/png" multiple></label>
+    <label class="file">Load folder…<input type="file" id="folderInput" webkitdirectory multiple></label>
+    <label class="file">Load manifest…<input type="file" id="manInput" accept=".json"></label>
+    <button class="ghost" id="tryFetch" title="Try loading the packaged definition.json">Auto-load spec</button>
+    <span class="status" id="status">Load the spec and some sheets to begin.</span>
+  </header>
+
+  <div class="col left">
+    <h2>Sheets</h2>
+    <div class="note">Each generated sheet is auto-sliced: transparent gutters are detected, then
+      each cell is trimmed to its opaque content. Pick a sheet to see its cells.</div>
+    <div class="sheets" id="sheetList"></div>
+    <hr>
+    <h2>Cells <span class="pill" id="cellCount">0</span></h2>
+    <div class="cellgrid" id="cellGrid"></div>
+  </div>
+
+  <div class="stage">
+    <h2>Assembled preview — canonical Yasser</h2>
+    <canvas id="preview" width="480" height="480"></canvas>
+    <div class="row">
+      <button id="resetBtn" class="ghost">Reset to canonical Yasser</button>
+      <button id="exportBtn" class="primary">Export manifest.json</button>
+    </div>
+    <div class="note" style="max-width:460px;text-align:center" id="assembleNote"></div>
+  </div>
+
+  <div class="col right">
+    <h2>Assign selected cell</h2>
+    <div class="field">
+      <label>Slot</label>
+      <select id="slotSel"></select>
+    </div>
+    <div class="field">
+      <label>Variant</label>
+      <select id="variantSel"></select>
+    </div>
+    <div class="field">
+      <label>View</label>
+      <select id="viewSel">
+        <option value="front">front</option>
+        <option value="3q_left">3q_left</option>
+        <option value="3q_right">3q_right</option>
+        <option value="side_left">side_left</option>
+        <option value="side_right">side_right</option>
+        <option value="back">back</option>
+      </select>
+    </div>
+    <div class="row">
+      <button id="assignBtn" class="primary">Bind cell → part</button>
+      <button id="unassignBtn" class="ghost">Clear</button>
+    </div>
+    <label class="checks" style="margin-top:8px"><input type="checkbox" id="mirrorOk"> mark symmetrical (mirror-safe)</label>
+    <div class="note">Binding fits the cell's trimmed content into the slot's canonical bounds and
+      pivot from the spec — the bridge from off-canvas art to 320-space.</div>
+    <hr>
+    <h2>Overlays</h2>
+    <div class="checks">
+      <label><input type="checkbox" id="ovBounds"> canonical bounds</label>
+      <label><input type="checkbox" id="ovPivots"> pivots</label>
+      <label><input type="checkbox" id="ovAnchors"> skeleton / anchors</label>
+      <label><input type="checkbox" id="ovNames"> layer names</label>
+    </div>
+    <hr>
+    <h2>Coverage</h2>
+    <div class="coverage" id="coverage"></div>
+  </div>
+</div>
+
+<script type="application/json" id="defData">{
+  "schema": "deskfolk.modular-character.v1",
+  "id": "deskfolk_yasser_modular_v1",
+  "name": "Yasser",
+  "type": "Modular Desktop Companion",
+  "version": 1,
+  "units": "pixels",
+  "reference_note": "Measurements are normalized from the supplied front-view reference. Use the common 320x320 authoring canvas and anchors as the source of truth.",
+  "coordinate_system": {
+    "canvas": {
+      "width": 320,
+      "height": 320
+    },
+    "origin": "top_left",
+    "character_bounds_front": {
+      "x": 96,
+      "y": 30,
+      "width": 128,
+      "height": 260
+    },
+    "ground_y": 290,
+    "center_x": 160,
+    "scale_rule": "All modular sprites are authored at this exact scale. Never independently resize a slot.",
+    "recommended_export": {
+      "authoring": "full_canvas",
+      "runtime": "trimmed_png_plus_metadata",
+      "filtering": "nearest",
+      "texture_padding": 2
+    }
+  },
+  "style_lock": {
+    "medium": "pixel art",
+    "anti_aliasing": false,
+    "outline": {
+      "type": "hard",
+      "width": 1
+    },
+    "pixel_density": "constant",
+    "shading_levels_per_material": "2-3",
+    "gradients": false,
+    "blur": false,
+    "glow": false,
+    "drop_shadow": false,
+    "ground_shadow": false,
+    "silhouette": "rounded and stocky",
+    "palette": [
+      "#FCE2A9",
+      "#FAC984",
+      "#FFBF72",
+      "#E99F51",
+      "#C6945D",
+      "#AD723B",
+      "#8F6237",
+      "#7F5A35",
+      "#6A482C",
+      "#4A3622",
+      "#2A1E14",
+      "#1B130D",
+      "#F1E4C8",
+      "#D6C7A6"
+    ]
+  },
+  "character_lock": {
+    "age": "adult",
+    "skin": "warm tan",
+    "body_shape": "short, stocky, rounded",
+    "head_scale": "slightly oversized",
+    "beard": "full dark-brown beard connected to moustache",
+    "eyes": "dark brown, heavy-lidded",
+    "eyebrows": "thick and dark",
+    "default_clothing": {
+      "beanie": "olive-brown knitted beanie pulled low",
+      "headphones": "large cream over-ear headphones with tan headband",
+      "hoodie": "dark brown hoodie with visible bunched hood",
+      "jacket": "brown quilted puffer jacket",
+      "trousers": "dark charcoal-brown",
+      "boots": "brown"
+    }
+  },
+  "skeleton_front": {
+    "root": [
+      160,
+      290
+    ],
+    "pelvis": [
+      160,
+      206
+    ],
+    "chest": [
+      160,
+      143
+    ],
+    "neck": [
+      160,
+      105
+    ],
+    "head": [
+      160,
+      76
+    ],
+    "left_shoulder": [
+      124,
+      132
+    ],
+    "left_elbow": [
+      113,
+      172
+    ],
+    "left_wrist": [
+      111,
+      207
+    ],
+    "right_shoulder": [
+      196,
+      132
+    ],
+    "right_elbow": [
+      207,
+      172
+    ],
+    "right_wrist": [
+      209,
+      207
+    ],
+    "left_hip": [
+      145,
+      207
+    ],
+    "left_knee": [
+      144,
+      247
+    ],
+    "left_ankle": [
+      142,
+      281
+    ],
+    "right_hip": [
+      175,
+      207
+    ],
+    "right_knee": [
+      176,
+      247
+    ],
+    "right_ankle": [
+      178,
+      281
+    ]
+  },
+  "layer_order_front": [
+    "back_accessory",
+    "back_hair_or_hood",
+    "rear_arm",
+    "rear_leg",
+    "torso",
+    "front_leg",
+    "front_arm",
+    "neck",
+    "head_base",
+    "ears",
+    "face_features",
+    "beard",
+    "beanie",
+    "headphones",
+    "handheld_prop",
+    "front_accessory",
+    "effects"
+  ],
+  "slots": {
+    "torso": {
+      "authoring_canvas": [
+        320,
+        320
+      ],
+      "default_bounds": {
+        "x": 103,
+        "y": 111,
+        "width": 114,
+        "height": 104
+      },
+      "pivot": [
+        160,
+        143
+      ],
+      "connection_anchors": {
+        "neck": [
+          160,
+          108
+        ],
+        "left_shoulder": [
+          124,
+          132
+        ],
+        "right_shoulder": [
+          196,
+          132
+        ],
+        "pelvis": [
+          160,
+          206
+        ]
+      },
+      "variants": [
+        "idle_front",
+        "idle_3q",
+        "idle_side",
+        "idle_back",
+        "breathing_in",
+        "breathing_out",
+        "lean_left",
+        "lean_right",
+        "sit_upright",
+        "sit_slouch",
+        "crouch",
+        "sleeping",
+        "jacket_open",
+        "jacket_closed",
+        "hood_up",
+        "hood_down"
+      ]
+    },
+    "head_base": {
+      "default_bounds": {
+        "x": 124,
+        "y": 42,
+        "width": 72,
+        "height": 76
+      },
+      "pivot": [
+        160,
+        105
+      ],
+      "variants": [
+        "front",
+        "front_tilt_left",
+        "front_tilt_right",
+        "3q_left",
+        "3q_right",
+        "side_left",
+        "side_right",
+        "back",
+        "look_up",
+        "look_down"
+      ]
+    },
+    "beanie": {
+      "default_bounds": {
+        "x": 119,
+        "y": 29,
+        "width": 82,
+        "height": 51
+      },
+      "pivot": [
+        160,
+        66
+      ],
+      "variants": [
+        "default_front",
+        "default_3q_left",
+        "default_3q_right",
+        "default_side_left",
+        "default_side_right",
+        "default_back",
+        "slightly_raised",
+        "pulled_lower",
+        "without_beanie"
+      ]
+    },
+    "headphones": {
+      "default_bounds": {
+        "x": 111,
+        "y": 43,
+        "width": 98,
+        "height": 66
+      },
+      "pivot": [
+        160,
+        74
+      ],
+      "variants": [
+        "on_ears_front",
+        "on_ears_3q_left",
+        "on_ears_3q_right",
+        "on_ears_side_left",
+        "on_ears_side_right",
+        "on_ears_back",
+        "around_neck",
+        "one_cup_off_left",
+        "one_cup_off_right",
+        "held_in_hand",
+        "without_headphones"
+      ]
+    },
+    "eyes": {
+      "default_bounds": {
+        "x": 137,
+        "y": 68,
+        "width": 46,
+        "height": 18
+      },
+      "pivot": [
+        160,
+        77
+      ],
+      "variants": [
+        "neutral",
+        "blink",
+        "half_blink",
+        "closed",
+        "sleepy",
+        "happy",
+        "laughing",
+        "wide",
+        "surprised",
+        "scared",
+        "angry",
+        "suspicious_left",
+        "suspicious_right",
+        "look_left",
+        "look_right",
+        "look_up",
+        "look_down",
+        "stoned_relaxed",
+        "embarrassed",
+        "sad"
+      ]
+    },
+    "eyebrows": {
+      "default_bounds": {
+        "x": 136,
+        "y": 61,
+        "width": 48,
+        "height": 10
+      },
+      "pivot": [
+        160,
+        66
+      ],
+      "variants": [
+        "neutral",
+        "raised_both",
+        "raised_left",
+        "raised_right",
+        "furrowed",
+        "angry",
+        "sad",
+        "confused",
+        "suspicious",
+        "surprised",
+        "relaxed"
+      ]
+    },
+    "nose": {
+      "default_bounds": {
+        "x": 152,
+        "y": 75,
+        "width": 16,
+        "height": 17
+      },
+      "pivot": [
+        160,
+        84
+      ],
+      "variants": [
+        "front",
+        "3q_left",
+        "3q_right",
+        "side_left",
+        "side_right"
+      ]
+    },
+    "mouth": {
+      "default_bounds": {
+        "x": 146,
+        "y": 91,
+        "width": 28,
+        "height": 15
+      },
+      "pivot": [
+        160,
+        98
+      ],
+      "variants": [
+        "closed",
+        "neutral_open",
+        "small_smile",
+        "smirk_left",
+        "smirk_right",
+        "frown",
+        "grin",
+        "laugh",
+        "shout",
+        "surprised_o",
+        "talk_a",
+        "talk_e",
+        "talk_i",
+        "talk_o",
+        "talk_u",
+        "mumble",
+        "grimace"
+      ]
+    },
+    "beard": {
+      "default_bounds": {
+        "x": 132,
+        "y": 82,
+        "width": 56,
+        "height": 42
+      },
+      "pivot": [
+        160,
+        103
+      ],
+      "variants": [
+        "neutral_front",
+        "neutral_3q_left",
+        "neutral_3q_right",
+        "neutral_side_left",
+        "neutral_side_right",
+        "smile_deformed",
+        "open_mouth_deformed"
+      ]
+    },
+    "left_upper_arm": {
+      "default_bounds": {
+        "x": 103,
+        "y": 124,
+        "width": 31,
+        "height": 55
+      },
+      "pivot": [
+        124,
+        132
+      ],
+      "end_anchor": [
+        113,
+        172
+      ],
+      "variants": [
+        "down",
+        "forward_30",
+        "forward_60",
+        "forward_90",
+        "up_45",
+        "up_90",
+        "back_30",
+        "cross_body",
+        "hands_on_hips",
+        "behind_back"
+      ]
+    },
+    "left_forearm": {
+      "default_bounds": {
+        "x": 99,
+        "y": 164,
+        "width": 28,
+        "height": 52
+      },
+      "pivot": [
+        113,
+        172
+      ],
+      "end_anchor": [
+        111,
+        207
+      ],
+      "variants": [
+        "straight_down",
+        "bent_30",
+        "bent_60",
+        "bent_90",
+        "bent_120",
+        "across_chest",
+        "toward_face",
+        "wave_position",
+        "point_position",
+        "coffee_position"
+      ]
+    },
+    "right_upper_arm": {
+      "default_bounds": {
+        "x": 186,
+        "y": 124,
+        "width": 31,
+        "height": 55
+      },
+      "pivot": [
+        196,
+        132
+      ],
+      "end_anchor": [
+        207,
+        172
+      ],
+      "variants": [
+        "down",
+        "forward_30",
+        "forward_60",
+        "forward_90",
+        "up_45",
+        "up_90",
+        "back_30",
+        "cross_body",
+        "hands_on_hips",
+        "behind_back"
+      ]
+    },
+    "right_forearm": {
+      "default_bounds": {
+        "x": 193,
+        "y": 164,
+        "width": 28,
+        "height": 52
+      },
+      "pivot": [
+        207,
+        172
+      ],
+      "end_anchor": [
+        209,
+        207
+      ],
+      "variants": [
+        "straight_down",
+        "bent_30",
+        "bent_60",
+        "bent_90",
+        "bent_120",
+        "across_chest",
+        "toward_face",
+        "wave_position",
+        "point_position",
+        "coffee_position"
+      ]
+    },
+    "left_hand": {
+      "default_bounds": {
+        "x": 101,
+        "y": 198,
+        "width": 21,
+        "height": 25
+      },
+      "pivot": [
+        111,
+        207
+      ],
+      "variants": [
+        "relaxed",
+        "fist",
+        "open_palm",
+        "wave_1",
+        "wave_2",
+        "thumbs_up",
+        "thumbs_down",
+        "peace",
+        "point",
+        "finger_gun",
+        "thinking_chin",
+        "facepalm",
+        "coffee_grip",
+        "phone_grip",
+        "controller_grip",
+        "keyboard_pose",
+        "mouse_pose",
+        "joint_grip"
+      ]
+    },
+    "right_hand": {
+      "default_bounds": {
+        "x": 198,
+        "y": 198,
+        "width": 21,
+        "height": 25
+      },
+      "pivot": [
+        209,
+        207
+      ],
+      "variants": [
+        "relaxed",
+        "fist",
+        "open_palm",
+        "wave_1",
+        "wave_2",
+        "thumbs_up",
+        "thumbs_down",
+        "peace",
+        "point",
+        "finger_gun",
+        "thinking_chin",
+        "facepalm",
+        "coffee_grip",
+        "phone_grip",
+        "controller_grip",
+        "keyboard_pose",
+        "mouse_pose",
+        "joint_grip"
+      ]
+    },
+    "pelvis": {
+      "default_bounds": {
+        "x": 130,
+        "y": 197,
+        "width": 60,
+        "height": 28
+      },
+      "pivot": [
+        160,
+        206
+      ],
+      "variants": [
+        "standing",
+        "walking",
+        "sitting",
+        "crouching",
+        "lean_left",
+        "lean_right"
+      ]
+    },
+    "left_leg": {
+      "default_bounds": {
+        "x": 130,
+        "y": 205,
+        "width": 31,
+        "height": 80
+      },
+      "pivot": [
+        145,
+        207
+      ],
+      "knee_anchor": [
+        144,
+        247
+      ],
+      "ankle_anchor": [
+        142,
+        281
+      ],
+      "variants": [
+        "stand",
+        "walk_contact",
+        "walk_down",
+        "walk_pass",
+        "walk_up",
+        "step_forward",
+        "step_back",
+        "sit_90",
+        "sit_relaxed",
+        "crossed",
+        "crouch"
+      ]
+    },
+    "right_leg": {
+      "default_bounds": {
+        "x": 159,
+        "y": 205,
+        "width": 31,
+        "height": 80
+      },
+      "pivot": [
+        175,
+        207
+      ],
+      "knee_anchor": [
+        176,
+        247
+      ],
+      "ankle_anchor": [
+        178,
+        281
+      ],
+      "variants": [
+        "stand",
+        "walk_contact",
+        "walk_down",
+        "walk_pass",
+        "walk_up",
+        "step_forward",
+        "step_back",
+        "sit_90",
+        "sit_relaxed",
+        "crossed",
+        "crouch"
+      ]
+    },
+    "left_boot": {
+      "default_bounds": {
+        "x": 124,
+        "y": 272,
+        "width": 38,
+        "height": 20
+      },
+      "pivot": [
+        142,
+        281
+      ],
+      "variants": [
+        "flat",
+        "heel_up",
+        "toe_up",
+        "side",
+        "back",
+        "sitting"
+      ]
+    },
+    "right_boot": {
+      "default_bounds": {
+        "x": 158,
+        "y": 272,
+        "width": 38,
+        "height": 20
+      },
+      "pivot": [
+        178,
+        281
+      ],
+      "variants": [
+        "flat",
+        "heel_up",
+        "toe_up",
+        "side",
+        "back",
+        "sitting"
+      ]
+    },
+    "props": {
+      "pivot_rule": "Each prop includes one or more named grip anchors matching the hand pivot.",
+      "variants": [
+        "coffee_cup",
+        "phone",
+        "game_controller",
+        "keyboard",
+        "mouse",
+        "laptop",
+        "joint",
+        "umbrella",
+        "book",
+        "microphone",
+        "blanket",
+        "pillow",
+        "beanbag"
+      ]
+    },
+    "effects": {
+      "variants": [
+        "zzz",
+        "question_mark",
+        "ellipsis",
+        "exclamation",
+        "surprise_marks",
+        "heart",
+        "music_notes",
+        "sweat",
+        "anger_mark",
+        "steam",
+        "smoke",
+        "sparkle",
+        "speech_bubble",
+        "thought_bubble",
+        "loading"
+      ]
+    }
+  },
+  "gesture_presets": {
+    "wave_right": {
+      "right_upper_arm": "up_90",
+      "right_forearm": "wave_position",
+      "right_hand_sequence": [
+        "wave_1",
+        "wave_2",
+        "wave_1",
+        "wave_2"
+      ]
+    },
+    "thumbs_up_right": {
+      "right_upper_arm": "forward_30",
+      "right_forearm": "bent_90",
+      "right_hand": "thumbs_up"
+    },
+    "point_right": {
+      "right_upper_arm": "forward_60",
+      "right_forearm": "bent_30",
+      "right_hand": "point"
+    },
+    "finger_guns": {
+      "left_upper_arm": "forward_60",
+      "left_forearm": "bent_30",
+      "left_hand": "finger_gun",
+      "right_upper_arm": "forward_60",
+      "right_forearm": "bent_30",
+      "right_hand": "finger_gun"
+    },
+    "thinking": {
+      "right_upper_arm": "cross_body",
+      "right_forearm": "toward_face",
+      "right_hand": "thinking_chin",
+      "eyes": "look_up",
+      "eyebrows": "raised_left",
+      "mouth": "closed"
+    }
+  },
+  "customization_categories": {
+    "body": [
+      "body_shape",
+      "skin_tone",
+      "height_profile"
+    ],
+    "head": [
+      "head_shape",
+      "ears",
+      "nose"
+    ],
+    "face": [
+      "eyes",
+      "eyebrows",
+      "mouth",
+      "beard",
+      "moustache"
+    ],
+    "hair_headwear": [
+      "hair",
+      "beanie",
+      "hat"
+    ],
+    "audio": [
+      "headphones",
+      "earbuds"
+    ],
+    "upper_clothing": [
+      "shirt",
+      "hoodie",
+      "jacket",
+      "coat"
+    ],
+    "lower_clothing": [
+      "trousers",
+      "shorts"
+    ],
+    "footwear": [
+      "boots",
+      "shoes",
+      "slippers"
+    ],
+    "hands": [
+      "bare",
+      "gloves",
+      "rings"
+    ],
+    "accessories": [
+      "glasses",
+      "necklace",
+      "watch",
+      "backpack"
+    ],
+    "props": [
+      "drink",
+      "phone",
+      "controller",
+      "umbrella",
+      "book"
+    ],
+    "effects": [
+      "mood_icons",
+      "weather",
+      "speech",
+      "particles"
+    ]
+  },
+  "compatibility_rules": [
+    "Every asset must use the same 320x320 authoring canvas and coordinate system.",
+    "Every asset must include a pivot and any required connection anchors.",
+    "Never scale individual parts at runtime except through a named full-character body preset.",
+    "Connected outlines must overlap by 1-2 pixels under the covering layer to prevent seams.",
+    "Clothing variants must provide matching torso, upper-arm and forearm pieces.",
+    "Head angle determines the compatible beanie, headphones, beard, nose, eyes and mouth set.",
+    "Hand pose determines the compatible forearm ending and prop grip anchor.",
+    "Use nearest-neighbour rendering and integer coordinates only.",
+    "Mirroring is allowed only for explicitly symmetrical assets; asymmetric shading and clothing details need separate left/right sprites."
+  ],
+  "generation_contract": {
+    "required_output": [
+      "transparent PNG",
+      "one isolated part only",
+      "full 320x320 canvas",
+      "part placed at exact canonical coordinates",
+      "no labels or guides in final PNG"
+    ],
+    "must_match": [
+      "reference character proportions",
+      "palette",
+      "pixel density",
+      "outline thickness",
+      "lighting direction",
+      "material shading",
+      "anchor positions"
+    ],
+    "prohibited": [
+      "redrawing unrelated body parts",
+      "changing body scale",
+      "changing camera angle",
+      "anti-aliasing",
+      "subpixel placement",
+      "soft edges",
+      "new colors outside palette"
+    ]
+  }
+}</script>
+<script>
+"use strict";
+// ------------------------------------------------------------------ state
+const S = {
+  def: null,                 // CharacterDefinition (raw JSON)
+  sheets: [],                // { name, img, w, h, cells: [{x,y,w,h, canvas}] }
+  activeSheet: -1,
+  selCell: null,             // { sheet, cell }
+  instances: [],             // manifest SpriteInstance[]
+  overlays: { bounds:false, pivots:false, anchors:false, names:false },
+};
+
+// Slot -> rig layer mapping, mirroring the Rust LayerResolver so the preview
+// matches runtime. Order within a layer is the array order.
+const LAYER_SLOTS = {
+  back_accessory: [], back_hair_or_hood: [], neck: [], ears: [], front_accessory: [],
+  rear_arm: ["left_upper_arm","left_forearm","left_hand"],
+  rear_leg: ["left_leg","left_boot"],
+  torso: ["pelvis","torso"],
+  front_leg: ["right_leg","right_boot"],
+  front_arm: ["right_upper_arm","right_forearm","right_hand"],
+  head_base: ["head_base"],
+  face_features: ["eyes","eyebrows","nose","mouth"],
+  beard: ["beard"], beanie: ["beanie"], headphones: ["headphones"],
+  handheld_prop: ["props"], effects: ["effects"],
+};
+
+const $ = id => document.getElementById(id);
+const setStatus = m => { $("status").textContent = m; };
+// A brief highlight so binding feedback can't be missed.
+function flash(m) {
+  const el = $("status"); el.textContent = m;
+  el.style.color = "var(--hi)"; el.style.fontWeight = "600";
+  setTimeout(() => { el.style.color = ""; el.style.fontWeight = ""; }, 1100);
+}
+
+// ------------------------------------------------------------------ loading
+$("defInput").addEventListener("change", e => readFile(e, txt => loadDef(JSON.parse(txt))));
+$("manInput").addEventListener("change", e => readFile(e, txt => loadManifest(JSON.parse(txt))));
+$("tryFetch").addEventListener("click", async () => {
+  const paths = ["../characters/yasser/modular/definition.json",
+                 "characters/yasser/modular/definition.json"];
+  for (const p of paths) {
+    try { const r = await fetch(p); if (r.ok) { loadDef(await r.json()); return; } } catch {}
+  }
+  setStatus("Couldn't fetch the packaged spec (open via a server, or use “Load definition.json”).");
+});
+$("sheetInput").addEventListener("change", async e => {
+  await addSheets([...e.target.files]);
+});
+$("folderInput").addEventListener("change", async e => {
+  // A directory pick hands us every file in the tree; keep the PNGs.
+  await addSheets([...e.target.files]);
+});
+
+async function addSheets(files) {
+  const pngs = files
+    .filter(f => /\.png$/i.test(f.name))
+    .sort((a, b) => (a.webkitRelativePath || a.name).localeCompare(b.webkitRelativePath || b.name));
+  if (!pngs.length) { setStatus("No PNGs found in that selection."); return; }
+  const existing = new Set(S.sheets.map(s => s.name));
+  let added = 0;
+  for (const f of pngs) {
+    if (existing.has(f.name)) continue;   // skip dupes by filename
+    await addSheet(f);
+    existing.add(f.name);
+    added++;
+  }
+  renderSheetList();
+  setStatus(`Loaded ${added} sheet${added === 1 ? "" : "s"} (${S.sheets.length} total).`);
+}
+
+function readFile(e, cb) {
+  const f = e.target.files[0]; if (!f) return;
+  const r = new FileReader(); r.onload = () => cb(r.result); r.readAsText(f);
+}
+
+function loadDef(def) {
+  S.def = def;
+  $("defName").textContent = def.id || "definition";
+  // populate slot dropdown with layered (pivot-bearing) slots first
+  const slots = Object.keys(def.slots || {});
+  $("slotSel").innerHTML = slots.map(s => `<option>${s}</option>`).join("");
+  onSlotChange();
+  setStatus(`Definition loaded: ${slots.length} slots, ${def.layer_order_front.length} layers.`);
+  draw(); coverage();
+}
+
+function loadManifest(man) {
+  if (!S.def) { setStatus("Load the definition first."); return; }
+  S.instances = (man.instances || []).slice();
+  setStatus(`Manifest loaded: ${S.instances.length} instances.`);
+  markAssignedCells(); draw(); coverage();
+}
+
+async function addSheet(file) {
+  const url = URL.createObjectURL(file);
+  const img = await loadImage(url);
+  const sheet = { name: file.name, img, w: img.width, h: img.height, cells: [] };
+  sliceSheet(sheet);
+  S.sheets.push(sheet);
+  if (S.activeSheet < 0) { S.activeSheet = 0; renderCells(); }
+  setStatus(`Sliced ${file.name} (${img.width}×${img.height}) → ${sheet.cells.length} cells.`);
+}
+
+const loadImage = src => new Promise((res, rej) => {
+  const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src;
+});
+
+// ------------------------------------------------------------------ slicing
+// Detect the grid from transparent gutters, then trim each cell to its content.
+function sliceSheet(sheet) {
+  const { img, w, h } = sheet;
+  const c = document.createElement("canvas"); c.width = w; c.height = h;
+  const ctx = c.getContext("2d"); ctx.drawImage(img, 0, 0);
+  const data = ctx.getImageData(0, 0, w, h).data;
+  const A = (x, y) => data[(y * w + x) * 4 + 3];
+
+  // Column / row alpha presence.
+  const colHas = new Array(w).fill(false), rowHas = new Array(h).fill(false);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    if (A(x, y) > 24) { colHas[x] = true; rowHas[y] = true; }
+  }
+  const bands = arr => {          // runs of `true` separated by gutters
+    const out = []; let s = -1;
+    for (let i = 0; i < arr.length; i++) {
+      if (arr[i] && s < 0) s = i;
+      else if (!arr[i] && s >= 0) { if (i - s >= 6) out.push([s, i]); s = -1; }
+    }
+    if (s >= 0 && arr.length - s >= 6) out.push([s, arr.length]);
+    return out;
+  };
+  const colBands = bands(colHas), rowBands = bands(rowHas);
+  sheet.cols = colBands.length; sheet.rows = rowBands.length;
+
+  // Each (rowBand × colBand) is a candidate cell; trim to its own content bbox.
+  sheet.cells = [];
+  for (const [ry0, ry1] of rowBands) for (const [cx0, cx1] of colBands) {
+    let x0 = cx1, y0 = ry1, x1 = cx0, y1 = ry0;
+    for (let y = ry0; y < ry1; y++) for (let x = cx0; x < cx1; x++) {
+      if (A(x, y) > 24) {
+        if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+      }
+    }
+    if (x1 < x0 || y1 < y0) continue;                 // empty cell
+    sheet.cells.push({ x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 });
+  }
+}
+
+// ------------------------------------------------------------------ UI: sheets & cells
+function renderSheetList() {
+  const el = $("sheetList"); el.innerHTML = "";
+  S.sheets.forEach((s, i) => {
+    const d = document.createElement("div");
+    d.className = "sheet-item" + (i === S.activeSheet ? " active" : "");
+    d.innerHTML = `<span class="name">${s.name}</span>
+      <span class="dim">${s.cols}×${s.rows} · ${s.cells.length}</span>`;
+    d.onclick = () => { S.activeSheet = i; renderSheetList(); renderCells(); };
+    el.appendChild(d);
+  });
+}
+
+function renderCells() {
+  const grid = $("cellGrid"); grid.innerHTML = "";
+  const sheet = S.sheets[S.activeSheet];
+  if (!sheet) { $("cellCount").textContent = "0"; return; }
+  $("cellCount").textContent = sheet.cells.length;
+  sheet.cells.forEach((cell, idx) => {
+    const wrap = document.createElement("div");
+    wrap.className = "cell";
+    const bound = S.instances.find(i => i.source === sheet.name &&
+      i.region.x === cell.x && i.region.y === cell.y);
+    if (bound) wrap.classList.add("assigned");
+    if (S.selCell && S.selCell.sheet === S.activeSheet && S.selCell.idx === idx) wrap.classList.add("sel");
+    const cv = document.createElement("canvas");
+    cv.width = cell.w; cv.height = cell.h;
+    cv.getContext("2d").drawImage(sheet.img, cell.x, cell.y, cell.w, cell.h, 0, 0, cell.w, cell.h);
+    wrap.appendChild(cv);
+    if (bound) { const t = document.createElement("div"); t.className = "tag";
+      t.textContent = bound.slot + "/" + bound.variant; wrap.appendChild(t); }
+    wrap.onclick = () => {
+      S.selCell = { sheet: S.activeSheet, idx, cell };
+      guessSlotFromSheet(sheet.name);
+      renderCells();
+      setStatus(`Selected cell ${idx} of ${sheet.name} — pick slot/variant, then Bind.`);
+    };
+    grid.appendChild(wrap);
+  });
+}
+
+function markAssignedCells() { renderCells(); }
+
+// Sheets are named "<slot>__batch_NN.png"; pre-target that slot on selection.
+function guessSlotFromSheet(name) {
+  if (!S.def) return;
+  const slot = String(name).split("__")[0];
+  if (S.def.slots && S.def.slots[slot]) { $("slotSel").value = slot; onSlotChange(); }
+}
+
+// ------------------------------------------------------------------ assign
+$("slotSel").addEventListener("change", onSlotChange);
+function onSlotChange() {
+  if (!S.def) return;
+  const slot = $("slotSel").value;
+  const vs = (S.def.slots[slot] && S.def.slots[slot].variants) || [];
+  $("variantSel").innerHTML = vs.map(v => `<option>${v}</option>`).join("");
+}
+
+$("assignBtn").addEventListener("click", () => {
+  if (!S.def) return flash("Definition not loaded — reopen the tool (the spec is embedded).");
+  if (!S.selCell) return flash("Click a cell in the left panel first.");
+  const slot = $("slotSel").value, variant = $("variantSel").value, view = $("viewSel").value;
+  if (!slot) return flash("Pick a slot.");
+  if (!variant) return flash("Pick a variant.");
+  const sdef = S.def.slots[slot] || {};
+  const sheet = S.sheets[S.selCell.sheet], cell = S.selCell.cell;
+  const cb = sdef.default_bounds || { x: 96, y: 96, width: cell.w, height: cell.h };
+  const pv = sdef.pivot || [cb.x + cb.width / 2, cb.y + cb.height / 2];
+  const inst = {
+    id: `${slot}/${variant}${view !== "front" ? "/" + view : ""}`,
+    slot, variant, view, source: sheet.name,
+    region: { x: cell.x, y: cell.y, w: cell.w, h: cell.h },
+    canonical_bounds: { x: cb.x, y: cb.y, width: cb.width, height: cb.height },
+    pivot: [pv[0], pv[1]],
+    angle: 0, mirror_ok: $("mirrorOk").checked,
+  };
+  // replace an existing binding of the same id, else push
+  S.instances = S.instances.filter(i => i.id !== inst.id);
+  S.instances.push(inst);
+  flash(`✓ Bound ${inst.id} — preview updated (${S.instances.length} part${S.instances.length===1?"":"s"}).`);
+  renderCells(); draw(); coverage();
+});
+
+$("unassignBtn").addEventListener("click", () => {
+  if (!S.selCell) return;
+  const sheet = S.sheets[S.selCell.sheet], cell = S.selCell.cell;
+  S.instances = S.instances.filter(i => !(i.source === sheet.name &&
+    i.region.x === cell.x && i.region.y === cell.y));
+  renderCells(); draw(); coverage();
+});
+
+// ------------------------------------------------------------------ overlays
+for (const [id, key] of [["ovBounds","bounds"],["ovPivots","pivots"],["ovAnchors","anchors"],["ovNames","names"]]) {
+  $(id).addEventListener("change", e => { S.overlays[key] = e.target.checked; draw(); });
+}
+$("resetBtn").addEventListener("click", () => { setStatus("Preview shows canonical Yasser (spec defaults)."); draw(); });
+
+// ------------------------------------------------------------------ preview
+// Assemble canonical Yasser: for each layer, each slot, pick the instance whose
+// variant is the slot's spec default (first variant) and view 'front'.
+function canonicalPlan() {
+  if (!S.def) return [];
+  const plan = [];
+  for (const layer of S.def.layer_order_front) {
+    for (const slot of (LAYER_SLOTS[layer] || [])) {
+      const sdef = S.def.slots[slot]; if (!sdef || !sdef.pivot) continue;
+      const variant = (sdef.variants || [])[0]; if (!variant) continue;
+      const inst = S.instances.find(i => i.slot === slot && i.variant === variant) ||
+                   S.instances.find(i => i.slot === slot);
+      plan.push({ layer, slot, variant, inst });
+    }
+  }
+  return plan;
+}
+
+function draw() {
+  const cv = $("preview"), ctx = cv.getContext("2d");
+  ctx.imageSmoothingEnabled = false;
+  ctx.clearRect(0, 0, cv.width, cv.height);
+  if (!S.def) return;
+  const canvas = (S.def.coordinate_system && S.def.coordinate_system.canvas) || { width: 320, height: 320 };
+  const scale = cv.width / canvas.width;
+  const plan = canonicalPlan();
+  const sheetByName = Object.fromEntries(S.sheets.map(s => [s.name, s]));
+
+  for (const p of plan) {
+    if (!p.inst) continue;
+    const sh = sheetByName[p.inst.source]; if (!sh) continue;
+    const r = p.inst.region, b = p.inst.canonical_bounds;
+    ctx.drawImage(sh.img, r.x, r.y, r.w, r.h,
+      b.x * scale, b.y * scale, b.width * scale, b.height * scale);
+  }
+  // overlays
+  for (const p of plan) {
+    const sdef = S.def.slots[p.slot];
+    if (S.overlays.bounds && sdef.default_bounds) {
+      const b = sdef.default_bounds;
+      ctx.strokeStyle = "rgba(240,160,48,.85)"; ctx.lineWidth = 1;
+      ctx.strokeRect(b.x * scale, b.y * scale, b.width * scale, b.height * scale);
+    }
+    if (S.overlays.pivots && sdef.pivot) {
+      const [px, py] = sdef.pivot; ctx.strokeStyle = "rgba(87,196,100,.95)";
+      ctx.beginPath(); ctx.moveTo((px-3)*scale, py*scale); ctx.lineTo((px+3)*scale, py*scale);
+      ctx.moveTo(px*scale, (py-3)*scale); ctx.lineTo(px*scale, (py+3)*scale); ctx.stroke();
+    }
+    if (S.overlays.names && p.inst) {
+      const b = p.inst.canonical_bounds; ctx.fillStyle = "rgba(255,255,255,.6)";
+      ctx.font = "9px " + getComputedStyle(document.body).getPropertyValue("--mono");
+      ctx.fillText(p.slot, b.x * scale + 1, b.y * scale + 9);
+    }
+  }
+  if (S.overlays.anchors && S.def.skeleton_front) {
+    ctx.fillStyle = "rgba(224,86,78,.9)";
+    for (const k in S.def.skeleton_front) {
+      const [x, y] = S.def.skeleton_front[k];
+      ctx.fillRect(x * scale - 1, y * scale - 1, 2, 2);
+    }
+  }
+  const bound = plan.filter(p => p.inst).length;
+  $("assembleNote").textContent = S.def
+    ? `${bound} of ${plan.length} canonical parts bound. Unbound parts are absent by design — bind cells to fill them.`
+    : "";
+}
+
+// ------------------------------------------------------------------ coverage
+function coverage() {
+  const el = $("coverage"); if (!S.def) { el.innerHTML = ""; return; }
+  const partSlots = Object.entries(S.def.slots).filter(([, s]) => s.pivot).map(([n]) => n);
+  el.innerHTML = partSlots.map(slot => {
+    const n = S.instances.filter(i => i.slot === slot).length;
+    const cls = n ? "present" : "missing";
+    return `<div class="slot"><span>${slot}</span><span class="${cls}">${n || "missing"}</span></div>`;
+  }).join("");
+}
+
+// ------------------------------------------------------------------ export
+$("exportBtn").addEventListener("click", () => {
+  if (!S.def) return;
+  const manifest = {
+    definition_id: S.def.id,
+    instances: S.instances.map(i => ({
+      id: i.id, slot: i.slot, variant: i.variant, view: i.view, source: i.source,
+      region: i.region, canonical_bounds: i.canonical_bounds, pivot: i.pivot,
+      angle: i.angle || 0, mirror_ok: !!i.mirror_ok,
+    })),
+  };
+  const blob = new Blob([JSON.stringify(manifest, null, 2)], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = "manifest.json"; a.click();
+  flash(`Exported manifest.json with ${manifest.instances.length} instances.`);
+});
+
+// ------------------------------------------------------------------ startup
+// The spec is embedded (see #defData) so the tool works standalone from file://
+// with no server and no manual load. Fall back to fetch/file-pick if it's empty.
+(function boot() {
+  const raw = ($("defData").textContent || "").trim();
+  if (raw && raw !== "__DEFINITION__") {
+    try { loadDef(JSON.parse(raw)); setStatus("Ready — spec embedded. Load a folder of sheets to begin."); }
+    catch (e) { setStatus("Embedded spec failed to parse; use “Load definition.json”. " + e.message); }
+  } else {
+    setStatus("Load the spec (Auto-load or Load definition.json) and some sheets to begin.");
+  }
+})();
+</script>
+</body>
+</html>

@@ -30,6 +30,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 image.workspace = true
 chrono.workspace = true
 parking_lot = "0.12"
+base64 = "0.22"
 # Blocking on purpose: the voice thread streams the brain's PCM as it arrives,
 # which is what lets the first sentence start playing while the second is still
 # being synthesised. Keeping it off the async runtime means a slow TTS chunk

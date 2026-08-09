@@ -1,0 +1,907 @@
+{
+  "schema": "deskfolk.modular-character.v1",
+  "id": "deskfolk_yasser_modular_v1",
+  "name": "Yasser",
+  "type": "Modular Desktop Companion",
+  "version": 1,
+  "units": "pixels",
+  "reference_note": "Measurements are normalized from the supplied front-view reference. Use the common 320x320 authoring canvas and anchors as the source of truth.",
+  "coordinate_system": {
+    "canvas": {
+      "width": 320,
+      "height": 320
+    },
+    "origin": "top_left",
+    "character_bounds_front": {
+      "x": 96,
+      "y": 30,
+      "width": 128,
+      "height": 260
+    },
+    "ground_y": 290,
+    "center_x": 160,
+    "scale_rule": "All modular sprites are authored at this exact scale. Never independently resize a slot.",
+    "recommended_export": {
+      "authoring": "full_canvas",
+      "runtime": "trimmed_png_plus_metadata",
+      "filtering": "nearest",
+      "texture_padding": 2
+    }
+  },
+  "style_lock": {
+    "medium": "pixel art",
+    "anti_aliasing": false,
+    "outline": {
+      "type": "hard",
+      "width": 1
+    },
+    "pixel_density": "constant",
+    "shading_levels_per_material": "2-3",
+    "gradients": false,
+    "blur": false,
+    "glow": false,
+    "drop_shadow": false,
+    "ground_shadow": false,
+    "silhouette": "rounded and stocky",
+    "palette": [
+      "#FCE2A9",
+      "#FAC984",
+      "#FFBF72",
+      "#E99F51",
+      "#C6945D",
+      "#AD723B",
+      "#8F6237",
+      "#7F5A35",
+      "#6A482C",
+      "#4A3622",
+      "#2A1E14",
+      "#1B130D",
+      "#F1E4C8",
+      "#D6C7A6"
+    ]
+  },
+  "character_lock": {
+    "age": "adult",
+    "skin": "warm tan",
+    "body_shape": "short, stocky, rounded",
+    "head_scale": "slightly oversized",
+    "beard": "full dark-brown beard connected to moustache",
+    "eyes": "dark brown, heavy-lidded",
+    "eyebrows": "thick and dark",
+    "default_clothing": {
+      "beanie": "olive-brown knitted beanie pulled low",
+      "headphones": "large cream over-ear headphones with tan headband",
+      "hoodie": "dark brown hoodie with visible bunched hood",
+      "jacket": "brown quilted puffer jacket",
+      "trousers": "dark charcoal-brown",
+      "boots": "brown"
+    }
+  },
+  "skeleton_front": {
+    "root": [
+      160,
+      290
+    ],
+    "pelvis": [
+      160,
+      206
+    ],
+    "chest": [
+      160,
+      143
+    ],
+    "neck": [
+      160,
+      105
+    ],
+    "head": [
+      160,
+      76
+    ],
+    "left_shoulder": [
+      124,
+      132
+    ],
+    "left_elbow": [
+      113,
+      172
+    ],
+    "left_wrist": [
+      111,
+      207
+    ],
+    "right_shoulder": [
+      196,
+      132
+    ],
+    "right_elbow": [
+      207,
+      172
+    ],
+    "right_wrist": [
+      209,
+      207
+    ],
+    "left_hip": [
+      145,
+      207
+    ],
+    "left_knee": [
+      144,
+      247
+    ],
+    "left_ankle": [
+      142,
+      281
+    ],
+    "right_hip": [
+      175,
+      207
+    ],
+    "right_knee": [
+      176,
+      247
+    ],
+    "right_ankle": [
+      178,
+      281
+    ]
+  },
+  "layer_order_front": [
+    "back_accessory",
+    "back_hair_or_hood",
+    "rear_arm",
+    "rear_leg",
+    "torso",
+    "front_leg",
+    "front_arm",
+    "neck",
+    "head_base",
+    "ears",
+    "face_features",
+    "beard",
+    "beanie",
+    "headphones",
+    "handheld_prop",
+    "front_accessory",
+    "effects"
+  ],
+  "slots": {
+    "torso": {
+      "authoring_canvas": [
+        320,
+        320
+      ],
+      "default_bounds": {
+        "x": 103,
+        "y": 111,
+        "width": 114,
+        "height": 104
+      },
+      "pivot": [
+        160,
+        143
+      ],
+      "connection_anchors": {
+        "neck": [
+          160,
+          108
+        ],
+        "left_shoulder": [
+          124,
+          132
+        ],
+        "right_shoulder": [
+          196,
+          132
+        ],
+        "pelvis": [
+          160,
+          206
+        ]
+      },
+      "variants": [
+        "idle_front",
+        "idle_3q",
+        "idle_side",
+        "idle_back",
+        "breathing_in",
+        "breathing_out",
+        "lean_left",
+        "lean_right",
+        "sit_upright",
+        "sit_slouch",
+        "crouch",
+        "sleeping",
+        "jacket_open",
+        "jacket_closed",
+        "hood_up",
+        "hood_down"
+      ]
+    },
+    "head_base": {
+      "default_bounds": {
+        "x": 124,
+        "y": 42,
+        "width": 72,
+        "height": 76
+      },
+      "pivot": [
+        160,
+        105
+      ],
+      "variants": [
+        "front",
+        "front_tilt_left",
+        "front_tilt_right",
+        "3q_left",
+        "3q_right",
+        "side_left",
+        "side_right",
+        "back",
+        "look_up",
+        "look_down"
+      ]
+    },
+    "beanie": {
+      "default_bounds": {
+        "x": 119,
+        "y": 29,
+        "width": 82,
+        "height": 51
+      },
+      "pivot": [
+        160,
+        66
+      ],
+      "variants": [
+        "default_front",
+        "default_3q_left",
+        "default_3q_right",
+        "default_side_left",
+        "default_side_right",
+        "default_back",
+        "slightly_raised",
+        "pulled_lower",
+        "without_beanie"
+      ]
+    },
+    "headphones": {
+      "default_bounds": {
+        "x": 111,
+        "y": 43,
+        "width": 98,
+        "height": 66
+      },
+      "pivot": [
+        160,
+        74
+      ],
+      "variants": [
+        "on_ears_front",
+        "on_ears_3q_left",
+        "on_ears_3q_right",
+        "on_ears_side_left",
+        "on_ears_side_right",
+        "on_ears_back",
+        "around_neck",
+        "one_cup_off_left",
+        "one_cup_off_right",
+        "held_in_hand",
+        "without_headphones"
+      ]
+    },
+    "eyes": {
+      "default_bounds": {
+        "x": 137,
+        "y": 68,
+        "width": 46,
+        "height": 18
+      },
+      "pivot": [
+        160,
+        77
+      ],
+      "variants": [
+        "neutral",
+        "blink",
+        "half_blink",
+        "closed",
+        "sleepy",
+        "happy",
+        "laughing",
+        "wide",
+        "surprised",
+        "scared",
+        "angry",
+        "suspicious_left",
+        "suspicious_right",
+        "look_left",
+        "look_right",
+        "look_up",
+        "look_down",
+        "stoned_relaxed",
+        "embarrassed",
+        "sad"
+      ]
+    },
+    "eyebrows": {
+      "default_bounds": {
+        "x": 136,
+        "y": 61,
+        "width": 48,
+        "height": 10
+      },
+      "pivot": [
+        160,
+        66
+      ],
+      "variants": [
+        "neutral",
+        "raised_both",
+        "raised_left",
+        "raised_right",
+        "furrowed",
+        "angry",
+        "sad",
+        "confused",
+        "suspicious",
+        "surprised",
+        "relaxed"
+      ]
+    },
+    "nose": {
+      "default_bounds": {
+        "x": 152,
+        "y": 75,
+        "width": 16,
+        "height": 17
+      },
+      "pivot": [
+        160,
+        84
+      ],
+      "variants": [
+        "front",
+        "3q_left",
+        "3q_right",
+        "side_left",
+        "side_right"
+      ]
+    },
+    "mouth": {
+      "default_bounds": {
+        "x": 146,
+        "y": 91,
+        "width": 28,
+        "height": 15
+      },
+      "pivot": [
+        160,
+        98
+      ],
+      "variants": [
+        "closed",
+        "neutral_open",
+        "small_smile",
+        "smirk_left",
+        "smirk_right",
+        "frown",
+        "grin",
+        "laugh",
+        "shout",
+        "surprised_o",
+        "talk_a",
+        "talk_e",
+        "talk_i",
+        "talk_o",
+        "talk_u",
+        "mumble",
+        "grimace"
+      ]
+    },
+    "beard": {
+      "default_bounds": {
+        "x": 132,
+        "y": 82,
+        "width": 56,
+        "height": 42
+      },
+      "pivot": [
+        160,
+        103
+      ],
+      "variants": [
+        "neutral_front",
+        "neutral_3q_left",
+        "neutral_3q_right",
+        "neutral_side_left",
+        "neutral_side_right",
+        "smile_deformed",
+        "open_mouth_deformed"
+      ]
+    },
+    "left_upper_arm": {
+      "default_bounds": {
+        "x": 103,
+        "y": 124,
+        "width": 31,
+        "height": 55
+      },
+      "pivot": [
+        124,
+        132
+      ],
+      "end_anchor": [
+        113,
+        172
+      ],
+      "variants": [
+        "down",
+        "forward_30",
+        "forward_60",
+        "forward_90",
+        "up_45",
+        "up_90",
+        "back_30",
+        "cross_body",
+        "hands_on_hips",
+        "behind_back"
+      ]
+    },
+    "left_forearm": {
+      "default_bounds": {
+        "x": 99,
+        "y": 164,
+        "width": 28,
+        "height": 52
+      },
+      "pivot": [
+        113,
+        172
+      ],
+      "end_anchor": [
+        111,
+        207
+      ],
+      "variants": [
+        "straight_down",
+        "bent_30",
+        "bent_60",
+        "bent_90",
+        "bent_120",
+        "across_chest",
+        "toward_face",
+        "wave_position",
+        "point_position",
+        "coffee_position"
+      ]
+    },
+    "right_upper_arm": {
+      "default_bounds": {
+        "x": 186,
+        "y": 124,
+        "width": 31,
+        "height": 55
+      },
+      "pivot": [
+        196,
+        132
+      ],
+      "end_anchor": [
+        207,
+        172
+      ],
+      "variants": [
+        "down",
+        "forward_30",
+        "forward_60",
+        "forward_90",
+        "up_45",
+        "up_90",
+        "back_30",
+        "cross_body",
+        "hands_on_hips",
+        "behind_back"
+      ]
+    },
+    "right_forearm": {
+      "default_bounds": {
+        "x": 193,
+        "y": 164,
+        "width": 28,
+        "height": 52
+      },
+      "pivot": [
+        207,
+        172
+      ],
+      "end_anchor": [
+        209,
+        207
+      ],
+      "variants": [
+        "straight_down",
+        "bent_30",
+        "bent_60",
+        "bent_90",
+        "bent_120",
+        "across_chest",
+        "toward_face",
+        "wave_position",
+        "point_position",
+        "coffee_position"
+      ]
+    },
+    "left_hand": {
+      "default_bounds": {
+        "x": 101,
+        "y": 198,
+        "width": 21,
+        "height": 25
+      },
+      "pivot": [
+        111,
+        207
+      ],
+      "variants": [
+        "relaxed",
+        "fist",
+        "open_palm",
+        "wave_1",
+        "wave_2",
+        "thumbs_up",
+        "thumbs_down",
+        "peace",
+        "point",
+        "finger_gun",
+        "thinking_chin",
+        "facepalm",
+        "coffee_grip",
+        "phone_grip",
+        "controller_grip",
+        "keyboard_pose",
+        "mouse_pose",
+        "joint_grip"
+      ]
+    },
+    "right_hand": {
+      "default_bounds": {
+        "x": 198,
+        "y": 198,
+        "width": 21,
+        "height": 25
+      },
+      "pivot": [
+        209,
+        207
+      ],
+      "variants": [
+        "relaxed",
+        "fist",
+        "open_palm",
+        "wave_1",
+        "wave_2",
+        "thumbs_up",
+        "thumbs_down",
+        "peace",
+        "point",
+        "finger_gun",
+        "thinking_chin",
+        "facepalm",
+        "coffee_grip",
+        "phone_grip",
+        "controller_grip",
+        "keyboard_pose",
+        "mouse_pose",
+        "joint_grip"
+      ]
+    },
+    "pelvis": {
+      "default_bounds": {
+        "x": 130,
+        "y": 197,
+        "width": 60,
+        "height": 28
+      },
+      "pivot": [
+        160,
+        206
+      ],
+      "variants": [
+        "standing",
+        "walking",
+        "sitting",
+        "crouching",
+        "lean_left",
+        "lean_right"
+      ]
+    },
+    "left_leg": {
+      "default_bounds": {
+        "x": 130,
+        "y": 205,
+        "width": 31,
+        "height": 80
+      },
+      "pivot": [
+        145,
+        207
+      ],
+      "knee_anchor": [
+        144,
+        247
+      ],
+      "ankle_anchor": [
+        142,
+        281
+      ],
+      "variants": [
+        "stand",
+        "walk_contact",
+        "walk_down",
+        "walk_pass",
+        "walk_up",
+        "step_forward",
+        "step_back",
+        "sit_90",
+        "sit_relaxed",
+        "crossed",
+        "crouch"
+      ]
+    },
+    "right_leg": {
+      "default_bounds": {
+        "x": 159,
+        "y": 205,
+        "width": 31,
+        "height": 80
+      },
+      "pivot": [
+        175,
+        207
+      ],
+      "knee_anchor": [
+        176,
+        247
+      ],
+      "ankle_anchor": [
+        178,
+        281
+      ],
+      "variants": [
+        "stand",
+        "walk_contact",
+        "walk_down",
+        "walk_pass",
+        "walk_up",
+        "step_forward",
+        "step_back",
+        "sit_90",
+        "sit_relaxed",
+        "crossed",
+        "crouch"
+      ]
+    },
+    "left_boot": {
+      "default_bounds": {
+        "x": 124,
+        "y": 272,
+        "width": 38,
+        "height": 20
+      },
+      "pivot": [
+        142,
+        281
+      ],
+      "variants": [
+        "flat",
+        "heel_up",
+        "toe_up",
+        "side",
+        "back",
+        "sitting"
+      ]
+    },
+    "right_boot": {
+      "default_bounds": {
+        "x": 158,
+        "y": 272,
+        "width": 38,
+        "height": 20
+      },
+      "pivot": [
+        178,
+        281
+      ],
+      "variants": [
+        "flat",
+        "heel_up",
+        "toe_up",
+        "side",
+        "back",
+        "sitting"
+      ]
+    },
+    "props": {
+      "pivot_rule": "Each prop includes one or more named grip anchors matching the hand pivot.",
+      "variants": [
+        "coffee_cup",
+        "phone",
+        "game_controller",
+        "keyboard",
+        "mouse",
+        "laptop",
+        "joint",
+        "umbrella",
+        "book",
+        "microphone",
+        "blanket",
+        "pillow",
+        "beanbag"
+      ]
+    },
+    "effects": {
+      "variants": [
+        "zzz",
+        "question_mark",
+        "ellipsis",
+        "exclamation",
+        "surprise_marks",
+        "heart",
+        "music_notes",
+        "sweat",
+        "anger_mark",
+        "steam",
+        "smoke",
+        "sparkle",
+        "speech_bubble",
+        "thought_bubble",
+        "loading"
+      ]
+    }
+  },
+  "gesture_presets": {
+    "wave_right": {
+      "right_upper_arm": "up_90",
+      "right_forearm": "wave_position",
+      "right_hand_sequence": [
+        "wave_1",
+        "wave_2",
+        "wave_1",
+        "wave_2"
+      ]
+    },
+    "thumbs_up_right": {
+      "right_upper_arm": "forward_30",
+      "right_forearm": "bent_90",
+      "right_hand": "thumbs_up"
+    },
+    "point_right": {
+      "right_upper_arm": "forward_60",
+      "right_forearm": "bent_30",
+      "right_hand": "point"
+    },
+    "finger_guns": {
+      "left_upper_arm": "forward_60",
+      "left_forearm": "bent_30",
+      "left_hand": "finger_gun",
+      "right_upper_arm": "forward_60",
+      "right_forearm": "bent_30",
+      "right_hand": "finger_gun"
+    },
+    "thinking": {
+      "right_upper_arm": "cross_body",
+      "right_forearm": "toward_face",
+      "right_hand": "thinking_chin",
+      "eyes": "look_up",
+      "eyebrows": "raised_left",
+      "mouth": "closed"
+    }
+  },
+  "customization_categories": {
+    "body": [
+      "body_shape",
+      "skin_tone",
+      "height_profile"
+    ],
+    "head": [
+      "head_shape",
+      "ears",
+      "nose"
+    ],
+    "face": [
+      "eyes",
+      "eyebrows",
+      "mouth",
+      "beard",
+      "moustache"
+    ],
+    "hair_headwear": [
+      "hair",
+      "beanie",
+      "hat"
+    ],
+    "audio": [
+      "headphones",
+      "earbuds"
+    ],
+    "upper_clothing": [
+      "shirt",
+      "hoodie",
+      "jacket",
+      "coat"
+    ],
+    "lower_clothing": [
+      "trousers",
+      "shorts"
+    ],
+    "footwear": [
+      "boots",
+      "shoes",
+      "slippers"
+    ],
+    "hands": [
+      "bare",
+      "gloves",
+      "rings"
+    ],
+    "accessories": [
+      "glasses",
+      "necklace",
+      "watch",
+      "backpack"
+    ],
+    "props": [
+      "drink",
+      "phone",
+      "controller",
+      "umbrella",
+      "book"
+    ],
+    "effects": [
+      "mood_icons",
+      "weather",
+      "speech",
+      "particles"
+    ]
+  },
+  "compatibility_rules": [
+    "Every asset must use the same 320x320 authoring canvas and coordinate system.",
+    "Every asset must include a pivot and any required connection anchors.",
+    "Never scale individual parts at runtime except through a named full-character body preset.",
+    "Connected outlines must overlap by 1-2 pixels under the covering layer to prevent seams.",
+    "Clothing variants must provide matching torso, upper-arm and forearm pieces.",
+    "Head angle determines the compatible beanie, headphones, beard, nose, eyes and mouth set.",
+    "Hand pose determines the compatible forearm ending and prop grip anchor.",
+    "Use nearest-neighbour rendering and integer coordinates only.",
+    "Mirroring is allowed only for explicitly symmetrical assets; asymmetric shading and clothing details need separate left/right sprites."
+  ],
+  "generation_contract": {
+    "required_output": [
+      "transparent PNG",
+      "one isolated part only",
+      "full 320x320 canvas",
+      "part placed at exact canonical coordinates",
+      "no labels or guides in final PNG"
+    ],
+    "must_match": [
+      "reference character proportions",
+      "palette",
+      "pixel density",
+      "outline thickness",
+      "lighting direction",
+      "material shading",
+      "anchor positions"
+    ],
+    "prohibited": [
+      "redrawing unrelated body parts",
+      "changing body scale",
+      "changing camera angle",
+      "anti-aliasing",
+      "subpixel placement",
+      "soft edges",
+      "new colors outside palette"
+    ]
+  }
+}

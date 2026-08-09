@@ -1,0 +1,105 @@
+{
+  "definition_id": "deskfolk_yasser_modular_v1",
+  "instances": [
+    {
+      "id": "head_base/front",
+      "slot": "head_base",
+      "variant": "front",
+      "view": "front",
+      "source": "sheets/head_base__batch_01.png",
+      "region": {
+        "x": 0,
+        "y": 0,
+        "w": 312,
+        "h": 416
+      },
+      "canonical_bounds": {
+        "x": 124,
+        "y": 42,
+        "width": 72,
+        "height": 76
+      },
+      "pivot": [
+        160,
+        105
+      ],
+      "angle": 0,
+      "mirror_ok": false
+    },
+    {
+      "id": "eyes/neutral",
+      "slot": "eyes",
+      "variant": "neutral",
+      "view": "front",
+      "source": "sheets/eyes__batch_01.png",
+      "region": {
+        "x": 0,
+        "y": 0,
+        "w": 312,
+        "h": 416
+      },
+      "canonical_bounds": {
+        "x": 137,
+        "y": 68,
+        "width": 46,
+        "height": 18
+      },
+      "pivot": [
+        160,
+        77
+      ],
+      "angle": 0,
+      "mirror_ok": false
+    },
+    {
+      "id": "nose/front",
+      "slot": "nose",
+      "variant": "front",
+      "view": "front",
+      "source": "sheets/nose__batch_01.png",
+      "region": {
+        "x": 0,
+        "y": 0,
+        "w": 312,
+        "h": 416
+      },
+      "canonical_bounds": {
+        "x": 152,
+        "y": 75,
+        "width": 16,
+        "height": 17
+      },
+      "pivot": [
+        160,
+        84
+      ],
+      "angle": 0,
+      "mirror_ok": false
+    },
+    {
+      "id": "mouth/closed",
+      "slot": "mouth",
+      "variant": "closed",
+      "view": "front",
+      "source": "sheets/mouth__batch_01.png",
+      "region": {
+        "x": 0,
+        "y": 0,
+        "w": 312,
+        "h": 416
+      },
+      "canonical_bounds": {
+        "x": 146,
+        "y": 91,
+        "width": 28,
+        "height": 15
+      },
+      "pivot": [
+        160,
+        98
+      ],
+      "angle": 0,
+      "mirror_ok": false
+    }
+  ]
+}

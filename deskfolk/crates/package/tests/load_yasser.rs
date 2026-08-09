@@ -24,6 +24,27 @@ fn loads_without_fatal_problems() {
 }
 
 #[test]
+fn resolves_a_portrait_from_the_talking_face() {
+    // No explicit `portrait` role, so it falls back to the talk clip's first
+    // frame — the talking face, which is what the UI shows as his avatar.
+    let p = yasser();
+    let sprite = p.portrait_sprite().expect("a portrait resolves");
+    assert!(sprite.starts_with("img_y_talk"), "portrait should be the talk face: {sprite}");
+    let path = p.portrait_path().expect("a portrait path");
+    assert!(path.exists(), "portrait PNG must exist on disk: {}", path.display());
+}
+
+#[test]
+fn scan_discovers_yasser_in_the_characters_dir() {
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../characters");
+    let found = deskfolk_package::scan(&dir);
+    let yasser = found.iter().find(|s| s.id == "yasser").expect("yasser is discoverable");
+    assert_eq!(yasser.dir, "yasser", "loads by its folder name");
+    assert!(yasser.tagline.is_some(), "the picker shows a tagline");
+    assert!(yasser.portrait.as_ref().is_some_and(|p| p.exists()), "with a portrait");
+}
+
+#[test]
 fn ships_clean_with_no_warnings() {
     // The package we ship is the reference every third-party author copies.
     // It should not model bad practice.
@@ -42,15 +63,18 @@ fn carries_the_whole_alpha_behavior_table() {
         names.iter().filter(|n| !n.starts_with("hd_")).count()
     };
     // 20 + 19 at the alpha; `walk`, `walk_right` and `stand` joined the
-    // behaviour table when he stopped hopping and started walking for real.
+    // behaviour table when he stopped hopping and started walking for real,
+    // `stand_left` / `stand_right` when standing gained a direction to face, and
+    // the eight `teleport_{out,in}_{a,b}[_l]` clips for instant transmission
+    // both ways.
     assert_eq!(
         behaviour(p.manifest.clips.keys().collect()),
-        23,
+        33,
         "clip count drifted from the alpha"
     );
     assert_eq!(
         behaviour(p.manifest.emotions.keys().collect()),
-        22,
+        32,
         "emotion count drifted from the alpha"
     );
     assert_eq!(p.manifest.visemes.len(), 4);
@@ -153,6 +177,32 @@ fn dance_cycles_its_music_note_overlay() {
     let dance = p.clip("dance").expect("dance clip");
     assert!(dance.fx.len() > 1);
     assert!(dance.fx_ms > 0);
+}
+
+#[test]
+fn the_instant_transmission_clips_are_all_present_and_play_once() {
+    // The app plays these four by name and times them by frame count, so a
+    // rename or a stray `loop: true` would break the teleport silently.
+    let p = yasser();
+    for name in [
+        "teleport_out_a",
+        "teleport_in_a",
+        "teleport_out_b",
+        "teleport_in_b",
+        "teleport_out_a_l",
+        "teleport_in_a_l",
+        "teleport_out_b_l",
+        "teleport_in_b_l",
+    ] {
+        let emo = p.manifest.emotions.get(name).unwrap_or_else(|| panic!("no emotion {name}"));
+        let clip = p.clip(&emo.clip).unwrap_or_else(|| panic!("{name} points at a missing clip"));
+        assert!(!clip.looping, "{name} must play once and park, not loop");
+    }
+    // Sheet a is six frames a half, b is eight — the app's timing depends on it.
+    assert_eq!(p.clip("teleport_out_a").unwrap().frames.len(), 6);
+    assert_eq!(p.clip("teleport_in_a").unwrap().frames.len(), 6);
+    assert_eq!(p.clip("teleport_out_b").unwrap().frames.len(), 8);
+    assert_eq!(p.clip("teleport_in_b").unwrap().frames.len(), 8);
 }
 
 #[test]

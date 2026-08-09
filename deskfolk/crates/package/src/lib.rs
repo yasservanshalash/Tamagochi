@@ -198,6 +198,11 @@ pub struct Roles {
     /// Full-frame overlay frames flashed during a glitch.
     #[serde(default)]
     pub glitch_fx: Vec<String>,
+    /// The single sprite to use as his avatar/portrait in the UI (the talking
+    /// face reads best). Optional — falls back to the talk clip's first frame —
+    /// so every character, base or community, has a portrait without extra work.
+    #[serde(default)]
+    pub portrait: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -439,6 +444,73 @@ impl CharacterPackage {
     pub fn clip(&self, name: &str) -> Option<&Clip> {
         self.manifest.clips.get(name)
     }
+
+    /// The sprite basename to show as his avatar: the declared `portrait` role
+    /// if any, otherwise the first frame of his talk clip (the talking face),
+    /// otherwise the idle clip's first frame. Always resolves to *something* a
+    /// UI can render, for any character.
+    pub fn portrait_sprite(&self) -> Option<String> {
+        if let Some(p) = &self.manifest.roles.portrait {
+            return Some(p.clone());
+        }
+        let first_frame = |clip: &str| {
+            self.clip(clip).and_then(|c| c.frames.first()).map(|f| f.img.clone())
+        };
+        first_frame(&self.manifest.roles.talk).or_else(|| first_frame(&self.manifest.roles.idle))
+    }
+
+    /// Absolute path to the avatar PNG, if one resolves.
+    pub fn portrait_path(&self) -> Option<PathBuf> {
+        self.portrait_sprite().map(|s| self.sprite_path(&s))
+    }
+}
+
+/// A one-line summary of a character package, for the picker in the wizard and
+/// the Control Center — read without loading the whole package's sprites.
+#[derive(Debug, Clone, Serialize)]
+pub struct PackageSummary {
+    pub id: String,
+    pub name: String,
+    pub tagline: Option<String>,
+    pub author: Option<String>,
+    /// Folder id under the characters dir, which the app loads by.
+    pub dir: String,
+    /// Avatar PNG path, if one resolves.
+    pub portrait: Option<PathBuf>,
+}
+
+/// Discover the character packages under a directory: every immediate subfolder
+/// that contains a valid `character.json`. Base and community packs are found
+/// identically — a folder is a folder. Unreadable/invalid folders are skipped,
+/// never fatal, so one broken pack can't hide the rest.
+pub fn scan(characters_dir: impl AsRef<Path>) -> Vec<PackageSummary> {
+    let dir = characters_dir.as_ref();
+    let mut out = Vec::new();
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return out;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        match CharacterPackage::load_dir(&path) {
+            Ok(pkg) => {
+                let folder = path.file_name().and_then(|s| s.to_str()).unwrap_or("").to_string();
+                out.push(PackageSummary {
+                    id: pkg.manifest.id.clone(),
+                    name: pkg.manifest.name.clone(),
+                    tagline: pkg.manifest.tagline.clone(),
+                    author: pkg.manifest.author.clone(),
+                    dir: folder,
+                    portrait: pkg.portrait_path(),
+                });
+            }
+            Err(e) => tracing::debug!("skipping {}: {e}", path.display()),
+        }
+    }
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    out
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

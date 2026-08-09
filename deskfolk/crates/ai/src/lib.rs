@@ -108,7 +108,10 @@ impl ThinkReply {
                 emotions.first().cloned().unwrap_or_default()
             };
         }
-        if !matches!(self.action.as_str(), "listen" | "sleep") {
+        if !matches!(
+            self.action.as_str(),
+            "listen" | "sleep" | "walk" | "walk_left" | "walk_right"
+        ) {
             self.action = "none".into();
         }
         self.glitch = self.glitch.min(100);
@@ -413,7 +416,9 @@ mod tests {
 
     #[test]
     fn sanitize_keeps_valid_actions() {
-        for a in ["listen", "sleep"] {
+        // The agent vocabulary his body can perform: the two the engine owns
+        // plus the movement verbs the app grants.
+        for a in ["listen", "sleep", "walk", "walk_left", "walk_right"] {
             let r = ThinkReply { emotion: "talk".into(), action: a.into(), ..Default::default() }
                 .sanitize(&emos());
             assert_eq!(r.action, a);

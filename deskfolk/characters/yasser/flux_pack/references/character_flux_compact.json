@@ -1,0 +1,67 @@
+{
+  "id": "deskfolk_yasser_modular_v1",
+  "name": "Yasser",
+  "canvas": {
+    "width": 320,
+    "height": 320
+  },
+  "character_bounds_front": {
+    "x": 96,
+    "y": 30,
+    "width": 128,
+    "height": 260
+  },
+  "center_x": 160,
+  "ground_y": 290,
+  "style": {
+    "medium": "pixel art",
+    "outline": {
+      "type": "hard",
+      "width": 1
+    },
+    "pixel_density": "constant",
+    "shading_levels": "2-3",
+    "palette": [
+      "#FCE2A9",
+      "#FAC984",
+      "#FFBF72",
+      "#E99F51",
+      "#C6945D",
+      "#AD723B",
+      "#8F6237",
+      "#7F5A35",
+      "#6A482C",
+      "#4A3622",
+      "#2A1E14",
+      "#1B130D",
+      "#F1E4C8",
+      "#D6C7A6"
+    ]
+  },
+  "appearance": {
+    "age": "adult",
+    "skin": "warm tan",
+    "body_shape": "short, stocky, rounded",
+    "head_scale": "slightly oversized",
+    "beard": "full dark-brown beard connected to moustache",
+    "eyes": "dark brown, heavy-lidded",
+    "eyebrows": "thick and dark",
+    "default_clothing": {
+      "beanie": "olive-brown knitted beanie pulled low",
+      "headphones": "large cream over-ear headphones with tan headband",
+      "hoodie": "dark brown hoodie with visible bunched hood",
+      "jacket": "brown quilted puffer jacket",
+      "trousers": "dark charcoal-brown",
+      "boots": "brown"
+    }
+  },
+  "rules": [
+    "Match the attached master reference exactly",
+    "Keep identical face, beard, clothing, silhouette and proportions",
+    "Transparent background",
+    "Hard 1-pixel outlines",
+    "Flat 2-3 tone shading",
+    "Integer pixel placement",
+    "No labels or guides"
+  ]
+}

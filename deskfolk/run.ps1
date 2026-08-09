@@ -11,11 +11,20 @@
 
 param(
     [switch]$Release,
-    [switch]$NoBrain
+    [switch]$NoBrain,
+    [switch]$Dev
 )
 
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
+
+# Developer mode: the modular companion + the dev-only Sprite Studio (right-click
+# him -> "Sprite Studio (dev)"). Off by default so a normal run ships untouched.
+if ($Dev) {
+    $env:DESKFOLK_DEV = "1"
+    $env:DESKFOLK_MODULAR = "1"
+    Write-Host "  dev mode: modular render + Sprite Studio enabled" -ForegroundColor Cyan
+}
 
 function Test-Port($port) {
     foreach ($h in @("127.0.0.1", "::1")) {
@@ -63,12 +72,38 @@ if ($NoBrain) {
     }
 }
 
-# --- The Control Center (optional) ----------------------------------------
-# The only thing left that is a web page. It opens on demand from his menu, so
-# the dev server is only needed if you actually go looking for it.
-if (-not (Test-Port 1420)) {
-    Write-Host "  no UI server on :1420 - the Control Center won't open" -ForegroundColor DarkGray
-    Write-Host "    if you need it:  cd ui;  npm run dev" -ForegroundColor DarkGray
+# --- The web UI (wizard + Control Center) ---------------------------------
+# A debug build loads its web pages from the Vite dev server on :1420; a release
+# build uses the built bundle in ui/dist. The onboarding wizard now opens on
+# first run, so a debug session needs that dev server up *before* the app —
+# otherwise the wizard window can't load.
+$ui = Join-Path $PSScriptRoot "ui"
+if ($Release) {
+    Write-Host "  building the UI bundle..." -ForegroundColor DarkGray
+    Push-Location $ui
+    npm run build | Out-Null
+    Pop-Location
+} elseif (Test-Port 1420) {
+    Write-Host "  UI dev server already up on :1420" -ForegroundColor DarkGray
+} else {
+    Write-Host "  starting the UI dev server on :1420 (its own window)..." -ForegroundColor DarkGray
+    # A visible, persistent window (`cmd /k`) so any npm/vite error is on screen
+    # rather than swallowed by a hidden process — the silent version could hang
+    # here forever with nothing to show for it.
+    Start-Process -FilePath "cmd.exe" `
+        -ArgumentList "/k", "npm run dev" `
+        -WorkingDirectory $ui
+    $ok = $false
+    foreach ($i in 1..40) {
+        Start-Sleep -Milliseconds 500
+        if (Test-Port 1420) { $ok = $true; break }
+    }
+    if ($ok) {
+        Write-Host "  UI dev server up" -ForegroundColor DarkGray
+    } else {
+        Write-Host "  UI dev server did not come up in 20s - check its window for an error." -ForegroundColor DarkYellow
+        Write-Host "  continuing anyway; if the wizard is blank, wait for that window then refresh it." -ForegroundColor DarkGray
+    }
 }
 
 # --- The companion --------------------------------------------------------

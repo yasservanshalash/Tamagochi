@@ -37,6 +37,9 @@
 pub mod canvas;
 #[cfg(windows)]
 mod desktop;
+/// Additive, dev-gated modular character assembly renderer.
+#[cfg(windows)]
+pub mod modular_paint;
 #[cfg(windows)]
 mod flyout;
 #[cfg(windows)]
@@ -47,6 +50,9 @@ pub mod ledges;
 mod menu;
 #[cfg(windows)]
 mod paint;
+/// Reading how cluttered a patch of desktop is, so he can stand somewhere calm.
+#[cfg(windows)]
+mod screen;
 #[cfg(windows)]
 mod sprites;
 #[cfg(windows)]
@@ -58,7 +64,20 @@ mod window;
 
 pub use menu::{Icon, MenuEntry};
 #[cfg(windows)]
+pub use modular_paint::{ModularScene, Overlays};
+#[cfg(windows)]
 pub use window::cursor_pos;
+
+/// Whether the dev-only modular character render path is enabled, via
+/// `DESKFOLK_MODULAR=1`. Off by default so the shipping companion is untouched;
+/// on, the host may assemble a [`ModularScene`] and paint it. Kept here so the
+/// flag has one authority rather than scattered `env::var` reads.
+pub fn modular_enabled() -> bool {
+    matches!(
+        std::env::var("DESKFOLK_MODULAR").ok().as_deref(),
+        Some("1") | Some("true") | Some("on")
+    )
+}
 
 #[cfg(windows)]
 use std::sync::atomic::Ordering;
@@ -149,7 +168,33 @@ impl Companion {
 
         let stage = config.stage;
         let on_desktop = config.on_desktop;
-        let spawned = window::spawn(config, sprites, host)?;
+
+        // Dev-only: assemble the modular character instead of the classic frames
+        // when DESKFOLK_MODULAR=1. The scene dir defaults to the package's
+        // `modular_sheet/` (parts sliced from the master reference sheet, with
+        // the real classic walk cycle), overridable with DESKFOLK_MODULAR_DIR.
+        // The older `modular_assembled/` (image-model-generated parts) is kept
+        // for comparison but is off-model and semi-transparent — don't default
+        // to it.
+        let modular = if modular_enabled() {
+            let dir = std::env::var("DESKFOLK_MODULAR_DIR")
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|_| pkg.root.join("modular_sheet"));
+            match modular_paint::ModularScene::load(&dir) {
+                Ok(s) => {
+                    tracing::info!("modular render on: scene loaded from {}", dir.display());
+                    Some(s)
+                }
+                Err(e) => {
+                    tracing::warn!("DESKFOLK_MODULAR set but scene load failed ({dir:?}): {e}");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        let spawned = window::spawn(config, sprites, modular, host)?;
         Ok(Self {
             hwnd: spawned.hwnd,
             shared: spawned.shared,
@@ -212,6 +257,16 @@ impl Companion {
     /// height to clear.
     pub fn ledges(&self) -> Vec<ledges::Ledge> {
         window::ledges_excluding(self.hwnd, self.feet_offset())
+    }
+
+    /// How cluttered the screen is under a rectangle, 0 (blank) .. 100 (dense
+    /// text/icons). Used to prefer a calm spot to stand. A failed capture reads
+    /// as the neutral 50, so it neither draws him in nor pushes him away.
+    pub fn region_busyness(&self, x: i32, y: i32, w: i32, h: i32) -> u32 {
+        match screen::capture_region(x, y, w, h) {
+            Some(px) => screen::busyness(&px, w.max(0) as usize, h.max(0) as usize),
+            None => 50,
+        }
     }
 
     /// The monitor's scale factor — 1.0 at 96 DPI, 1.5 at 150% scaling.

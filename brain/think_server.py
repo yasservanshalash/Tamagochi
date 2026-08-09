@@ -231,6 +231,54 @@ def music_intent(text: str):
     return None
 
 
+# Physical things he can be told to do with his body, matched the same way and
+# for the same reason as the music: a model that says "aight, stretchin' my
+# legs" and leaves the field empty has you watching him stand still. The set is
+# closed and the phrasings few, so the regex owns the command and the model is
+# left to talk. Direction-specific verbs come before the bare one so "walk left"
+# is not eaten by "walk".
+_BODY_INTENTS = [
+    ("walk_left",  r"\bwalk (?:to (?:the|your) )?left\b|\b(?:go|head|move) left\b"),
+    ("walk_right", r"\bwalk (?:to (?:the|your) )?right\b|\b(?:go|head|move) right\b"),
+    ("walk",       r"\btake a (?:walk|stroll)\b|\bgo(?:ing)? for a (?:walk|stroll)\b"
+                   r"|\bwalk around\b|\bwalk about\b|\bgo (?:for a )?wander\b"
+                   r"|\bwander (?:around|off)\b|\bstretch (?:your|them|ya) legs\b"
+                   r"|\bpace around\b|\bmove around\b|\bgo (?:take|for) a walk\b"),
+    ("sleep",      r"\bgo to sleep\b|\btake a nap\b|\blie down\b|\bgo sleep\b"
+                   r"|\bget some (?:rest|sleep)\b|\bpass out\b|\bcatch some z"),
+]
+_BODY_RE = [(verb, re.compile(pat, re.I)) for verb, pat in _BODY_INTENTS]
+# Talking *about* doing the thing, not being told to. "why don't you take a
+# walk" is still a command; "do you ever take walks" is not.
+_NOT_A_BODY_CMD = re.compile(
+    r"\b(?:do you|did you|have you|what|why do|how do|remember|think about|feel like|"
+    r"used to|ever)\b.{0,20}\b(?:walk|sleep|nap|sit|wander)\b", re.I)
+
+
+def body_intent(text: str):
+    """A physical action he is being told to take, or None.
+
+    Deterministic on purpose — see `music_intent`. The verb is validated again
+    on the app side, which owns the short list of things his body can actually
+    do, so a phrasing that slips through here to an unknown verb is a no-op
+    rather than a wedge.
+    """
+    t = (text or "").strip()
+    if not t or _NOT_A_BODY_CMD.search(t):
+        return None
+    # A one-word "walk" / "move" said to him is an order. Those words are far
+    # too common to match mid-sentence, but on their own — the way you bark a
+    # command at a pet — there is nothing else they could mean.
+    if re.fullmatch(r"(?:yo\s+|hey\s+|aight\s+|ok\s+)?"
+                    r"(?:walk|move|get\s+movin[g']?|start\s+walkin[g']?)[!.]?",
+                    t, re.I):
+        return "walk"
+    for verb, rx in _BODY_RE:
+        if rx.search(t):
+            return verb
+    return None
+
+
 def _clip(s: str, limit: int) -> str:
     """Cut to `limit` on a boundary, never mid-word.
 
@@ -578,13 +626,14 @@ Reply with STRICT JSON ONLY, no markdown, exactly:
 {"say": "<one or two short sentences, spoken aloud>",
  "emotion": "<one of: %s>",
  "glitch": <0-100 integer, how corrupted/possessed this moment feels>,
- "action": "<optional: none|camera|listen|home|sleep — a body action after
- speaking. Whenever what you said EXPECTS a human reply — you answered them,
- asked anything, greeted them, or even monologued AT them — use listen so
- you're ready when they talk back; the conversation should flow, not end
- after one line. Other verbs RARELY, only when they truly fit (curious ->
- camera; tired -> sleep). Default none only when you truly said it to
- nobody.>"}
+ "action": "<optional: none|camera|listen|home|sleep|walk|walk_left|walk_right
+ — a body action after speaking. Whenever what you said EXPECTS a human reply
+ — you answered them, asked anything, greeted them, or even monologued AT them
+ — use listen so you're ready when they talk back; the conversation should
+ flow, not end after one line. walk/walk_left/walk_right send you strolling
+ across the screen; sleep naps. Other verbs RARELY, only when they truly fit
+ (curious -> camera; restless -> walk; tired -> sleep). Default none only when
+ you truly said it to nobody.>"}
 
 MUSIC: you can work the music on this machine — skip, pause, volume, put
 something on. When he asks, just answer naturally as if you are doing it,
@@ -1295,9 +1344,16 @@ def think(req: ThinkReq):
         out = {}
 
     action = str(out.get("action", "none"))
-    if action not in ("none", "camera", "listen", "home", "sleep"):
+    if action not in ("none", "camera", "listen", "home", "sleep",
+                      "walk", "walk_left", "walk_right"):
         action = "none"
-    if req.event == "user_speech" and action == "none":
+    # A told-to command wins over both what the model volunteered and the
+    # listen default: if you say "take a walk", he walks — the ear can reopen
+    # once he gets there. This is the body's counterpart to `music_intent`.
+    told = body_intent(req.text)
+    if told:
+        action = told
+    elif req.event == "user_speech" and action == "none":
         action = "listen"    # replying to a human ALWAYS re-opens the ears
     # What he wants done to the music, if anything. Kept as a plain verb plus
     # an optional query and validated on the app side, which owns the short
