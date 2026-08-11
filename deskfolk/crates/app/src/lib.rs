@@ -583,7 +583,9 @@ pub(crate) fn boot_companion(app: &AppHandle) -> anyhow::Result<()> {
             tracing::info!("he replied to speech: {:?} ({})", h.say, h.emotion);
             mind::remember_exchange(&mind, &h.heard, &h.say);
             let has_audio = voice.speak(&h.say);
-            mind::obey_music(h.music.as_ref());
+            if let Some(excuse) = mind::obey_music(h.music.as_ref()) {
+                voice.speak(excuse);
+            }
             // A movement he was told to make (or chose): route it to the wander
             // loop. Not mutually exclusive with speaking — he can say "aight"
             // and set off at once.

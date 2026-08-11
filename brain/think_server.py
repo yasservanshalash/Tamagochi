@@ -184,7 +184,11 @@ def _wav_to_pcm16k(wav: bytes) -> bytes:
 # Ordered most specific first: "turn it down" must not be read as "play it".
 _MUSIC_INTENTS = [
     ("next",     r"\b(?:skip|next)\b(?:\s+(?:this|the|a|one|it))?\s*"
-                 r"(?:song|track|tune|joint)?\b"),
+                 r"(?:song|track|tune|joint)?\b"
+                 r"|\b(?:change|switch)\s+(?:the\s+|this\s+|that\s+)?"
+                 r"(?:song|track|music|tune)\b"
+                 r"|\b(?:another|different)\s+(?:song|track|tune)\b"
+                 r"|\b(?:put|throw)\s+(?:on\s+)?something else\b|\bsomething else\b"),
     ("previous", r"\b(?:previous|prev)\b|\bgo back\b|\bback (?:a|one) (?:song|track)\b"
                  r"|\blast (?:song|track)\b|\breplay\b"),
     ("louder",   r"\bturn (?:it|the (?:music|volume)) up\b|\blouder\b|\bvolume up\b"
@@ -203,6 +207,12 @@ _MUSIC_RE = [(verb, re.compile(pat, re.I)) for verb, pat in _MUSIC_INTENTS]
 _NOT_A_COMMAND = re.compile(
     r"\b(?:do you|can you|could you|would you|what|why|how|who|when|remember|think|like)\b"
     r".{0,24}\b(?:play|music|song)\b|\bplaying\b\s+(?:games?|around)", re.I)
+
+
+# What he says while doing it. A model asked to skip a track tends to write a
+# paragraph; a person by the speakers says two words and hits the button.
+_MUSIC_ACKS = ["aight bet.", "say less.", "on it — one sec.", "sure, one sec.",
+               "bet, hold on.", "gotchu.", "aight aight."]
 
 
 def music_intent(text: str):
@@ -225,6 +235,13 @@ def music_intent(text: str):
             continue
         if verb == "play":
             q = (m.groupdict().get("q") or "").strip(" .!?,")
+            # "play me some music" is not a search for the string "me some
+            # music" — strip the filler, and if nothing nameable is left it is
+            # just the play button.
+            q = re.sub(r"^(?:me|us)\s+", "", q, flags=re.I)
+            if re.fullmatch(r"(?:some\s+)?(?:music|songs?|tunes?|"
+                            r"somethin[g']?|anything|whatever)", q, re.I):
+                q = ""
             # "play" on its own is the button, not a search.
             return {"do": "play", "query": q} if q else {"do": "resume", "query": ""}
         return {"do": verb, "query": ""}
@@ -1361,6 +1378,7 @@ def think(req: ThinkReq):
     # should do nothing rather than be guessed at.
     # What he was actually asked wins over what the model volunteered.
     music = music_intent(req.text)
+    told_music = music is not None
     if music is None:
         volunteered = out.get("music")
         if isinstance(volunteered, str):
@@ -1454,6 +1472,14 @@ def think(req: ThinkReq):
         emotion = "suspicious"
         glitch = max(glitch, 15)
         print(f"hard-refuse override: {say!r}")
+
+    # He was told to do something to the music: the whole answer is a short
+    # "on it" — the *doing* is the reply, and a paragraph over the first bars
+    # of the song you asked for is worse than silence.
+    if told_music:
+        import random
+        say = random.choice(_MUSIC_ACKS)
+        print(f"music ack: {music} -> {say!r}")
 
     # Never remember our own failure line. Stored as one of his turns it goes
     # into the next prompt as an example of how he talks, and he starts

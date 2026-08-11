@@ -86,18 +86,26 @@ fn worth_speaking(event: &str) -> bool {
 /// Separate from the emotion and the action because it is not mutually
 /// exclusive with either: he can skip a track *and* answer you in the same
 /// breath, which is what a person in the room would do.
-pub fn obey_music(wish: Option<&deskfolk_ai::MusicWish>) {
-    let Some(w) = wish else { return };
+/// Returns a line he should say out loud when the wish could not be granted —
+/// an "aight bet" followed by nothing happening reads as him lying, so the
+/// failure has to be spoken, not just journalled.
+pub fn obey_music(wish: Option<&deskfolk_ai::MusicWish>) -> Option<&'static str> {
+    let w = wish?;
     let Some(parsed) = music::Wish::parse(&w.r#do, &w.query) else {
         if !w.r#do.trim().is_empty() {
             tracing::debug!("music: ignoring invented verb {:?}", w.r#do);
         }
-        return;
+        return None;
     };
     if music::grant(&parsed) {
         journal::did(parsed.describe());
+        None
     } else {
         journal::trouble(format!("{} — needs the Spotify Web API", parsed.describe()));
+        Some(
+            "ah hold up — I can't put specific songs on yet. \
+             hit Connect Spotify in my menu and then I got you.",
+        )
     }
 }
 
@@ -174,7 +182,9 @@ pub fn ask(
                 } else {
                     false
                 };
-                obey_music(reply.music.as_ref());
+                if let Some(excuse) = obey_music(reply.music.as_ref()) {
+                    voice.speak(excuse);
+                }
                 journal::said(journal::Said {
                     event: event.clone(),
                     heard: text.clone(),
