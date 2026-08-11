@@ -187,7 +187,7 @@ _MUSIC_INTENTS = [
                  r"(?:song|track|tune|joint)?\b"
                  r"|\b(?:change|switch)\s+(?:the\s+|this\s+|that\s+)?"
                  r"(?:song|track|music|tune)\b"
-                 r"|\b(?:another|different)\s+(?:song|track|tune)\b"
+                 r"|\b(?:another|different|any other)\s+(?:song|track|tune)\b"
                  r"|\b(?:put|throw)\s+(?:on\s+)?something else\b|\bsomething else\b"),
     ("previous", r"\b(?:previous|prev)\b|\bgo back\b|\bback (?:a|one) (?:song|track)\b"
                  r"|\blast (?:song|track)\b|\breplay\b"),
@@ -203,9 +203,12 @@ _MUSIC_INTENTS = [
     ("play",     r"\b(?:put on|play|throw on|stick on)\b(?:\s+(?P<q>.+))?"),
 ]
 _MUSIC_RE = [(verb, re.compile(pat, re.I)) for verb, pat in _MUSIC_INTENTS]
-# Words that mean he is talking *about* music, not asking for it.
+# Words that mean he is talking *about* music, not asking for it. "can you
+# play X" and "like" are deliberately NOT here: the first is how people ask
+# politely, and the second is filler this user says mid-order ("play me Fiend,
+# like, on Spotify") — both blocked real commands.
 _NOT_A_COMMAND = re.compile(
-    r"\b(?:do you|can you|could you|would you|what|why|how|who|when|remember|think|like)\b"
+    r"\b(?:do you|what|why|how|who|when|remember|think)\b"
     r".{0,24}\b(?:play|music|song)\b|\bplaying\b\s+(?:games?|around)", re.I)
 
 
@@ -249,6 +252,12 @@ def music_intent(text: str):
                 q = liked.group(1)
             q = re.sub(r"\s*,?\s*\bor\s+(?:some(?:thing|thin'?)|whatever|"
                        r"anything)\b.*$", "", q, flags=re.I)
+            q = re.sub(r"^some\s+", "", q, flags=re.I)
+            # Dangling filler an order trails off with: "play Fiend, like,".
+            # Punctuation goes first or the trailing comma hides the filler.
+            q = q.strip(" .!?,")
+            q = re.sub(r",?\s*\b(?:like|tho|though|man|fam|bro|please|pls|"
+                       r"right now|now)\s*$", "", q, flags=re.I)
             q = q.strip(" .!?,")
             if re.fullmatch(r"(?:some\s+)?(?:music|songs?|tunes?|"
                             r"somethin[g']?|something|anything|whatever)", q, re.I):
