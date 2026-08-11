@@ -272,6 +272,10 @@ fn run(
     // Held open across watch ticks. Reopening per tick would click the device
     // and, on headsets with sidetone, blip the user's own voice at them.
     let mut watch_rec: Option<Recorder> = None;
+    // A held-open stream stays pinned to the device it opened on, so changing
+    // the mic — in Windows or in his menu — used to need a full restart before
+    // he heard the new one. Re-resolve now and then and reopen if it moved.
+    let mut device_checked = Instant::now();
 
     loop {
         match rx.recv_timeout(Duration::from_millis(40)) {
@@ -293,6 +297,17 @@ fn run(
             }
             Err(RecvTimeoutError::Disconnected) => return,
             Err(RecvTimeoutError::Timeout) => {
+                if watch_rec.is_some() && device_checked.elapsed() >= Duration::from_secs(2) {
+                    device_checked = Instant::now();
+                    let now = crate::audio::resolved_input_name(&settings.lock());
+                    let held = watch_rec.as_ref().map(|r| r.device_name().to_string());
+                    if now.is_some() && now != held {
+                        tracing::info!(
+                            "mic: input device changed ({held:?} -> {now:?}); following it"
+                        );
+                        watch_rec = None;
+                    }
+                }
                 if watching && !state.listening.load(Ordering::Relaxed) {
                     watch_tick(
                         &client, &base, &settings, &state, &ears, &mut watch_rec,

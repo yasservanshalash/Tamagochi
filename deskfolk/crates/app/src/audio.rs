@@ -230,6 +230,16 @@ fn resample_mono(pcm: &[u8], from: u32, to: u32) -> Vec<f32> {
 // Capture
 // ---------------------------------------------------------------------------
 
+/// The name of the device the settings would resolve to *right now*.
+///
+/// A stream does not follow the Windows default when the user changes it — it
+/// stays pinned to whatever device it was opened on. Comparing this against
+/// [`Recorder::device_name`] is how a long-lived recorder finds out it is
+/// listening to the wrong microphone.
+pub fn resolved_input_name(settings: &AudioSettings) -> Option<String> {
+    pick_input(settings.input.as_deref())?.name().ok()
+}
+
 /// Records from the selected input as PCM16 mono at [`SOURCE_RATE`], which is
 /// exactly what the brain's `/pet/converse` endpoint expects.
 ///
@@ -241,6 +251,9 @@ pub struct Recorder {
     _stream: cpal::Stream,
     rx: Receiver<Vec<u8>>,
     level: Arc<Mutex<u8>>,
+    /// The device this stream was actually opened on, so a long-lived recorder
+    /// can notice that the effective device has since changed out from under it.
+    name: String,
 }
 
 #[allow(dead_code)]
@@ -282,7 +295,12 @@ impl Recorder {
 
         stream.play().ok()?;
         tracing::info!("audio in: '{name}' at {device_rate}Hz, {channels}ch");
-        Some(Self { _stream: stream, rx, level })
+        Some(Self { _stream: stream, rx, level, name })
+    }
+
+    /// The device this recorder is capturing from.
+    pub fn device_name(&self) -> &str {
+        &self.name
     }
 
     /// Everything captured since the last call.
