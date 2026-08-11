@@ -235,12 +235,23 @@ def music_intent(text: str):
             continue
         if verb == "play":
             q = (m.groupdict().get("q") or "").strip(" .!?,")
-            # "play me some music" is not a search for the string "me some
-            # music" — strip the filler, and if nothing nameable is left it is
-            # just the play button.
+            # Spoken orders arrive wrapped in filler — "play me something on
+            # Spotify, like Travis Scott or something" is a search for
+            # "Travis Scott", not for the whole sentence. Peel it down to the
+            # nameable thing; if nothing nameable is left it is just the play
+            # button.
+            q = re.split(r"[.!?]", q)[0].strip(" ,")
+            q = re.sub(r"\b(?:on|in|from)\s+spotify\b", "", q, flags=re.I)
             q = re.sub(r"^(?:me|us)\s+", "", q, flags=re.I)
+            liked = re.search(r"\b(?:some(?:thing|thin'?)\s*,?\s*)?like\s+(.+)$",
+                              q, re.I)
+            if liked:
+                q = liked.group(1)
+            q = re.sub(r"\s*,?\s*\bor\s+(?:some(?:thing|thin'?)|whatever|"
+                       r"anything)\b.*$", "", q, flags=re.I)
+            q = q.strip(" .!?,")
             if re.fullmatch(r"(?:some\s+)?(?:music|songs?|tunes?|"
-                            r"somethin[g']?|anything|whatever)", q, re.I):
+                            r"somethin[g']?|something|anything|whatever)", q, re.I):
                 q = ""
             # "play" on its own is the button, not a search.
             return {"do": "play", "query": q} if q else {"do": "resume", "query": ""}

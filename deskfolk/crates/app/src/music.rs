@@ -98,6 +98,22 @@ const VK_MEDIA_PLAY_PAUSE: u16 = 0xB3;
 /// Carry out a wish. `false` means it needs something we do not have — today,
 /// only searching for a track.
 pub fn grant(wish: &Wish) -> bool {
+    // "start the music" through the media key only works if a player is
+    // already the active media session; a Spotify that has not played since it
+    // opened ignores the key outright. With an account linked, resume goes
+    // through the Web API, which can wake the device — the key stays as the
+    // fallback if the API is having a day.
+    if matches!(wish, Wish::Resume | Wish::PlayPause) && crate::spotify::connected() {
+        std::thread::spawn(|| match crate::spotify::resume() {
+            Ok(()) => tracing::info!("music: started playback via the Web API"),
+            Err(e) => {
+                tracing::warn!("music: API resume failed ({e}); pressing the key instead");
+                press(VK_MEDIA_PLAY_PAUSE);
+            }
+        });
+        tracing::info!("music: {}", wish.describe());
+        return true;
+    }
     match wish.key() {
         Some((vk, times)) => {
             for _ in 0..times {

@@ -225,6 +225,42 @@ fn urlenc(s: &str) -> String {
     out
 }
 
+/// Resume playback with nothing named — the play button, but through the API,
+/// which unlike the media key can wake a Spotify that is not the active media
+/// session (a freshly opened one ignores the key entirely).
+pub fn resume() -> Result<(), String> {
+    let token = access_token()?;
+    let client = http()?;
+    let put = |device: Option<&str>| {
+        let url = match device {
+            Some(id) => format!("https://api.spotify.com/v1/me/player/play?device_id={id}"),
+            None => "https://api.spotify.com/v1/me/player/play".into(),
+        };
+        client.put(url).bearer_auth(&token).header("Content-Length", "0").send()
+    };
+    let resp = put(None).map_err(|e| e.to_string())?;
+    if resp.status().is_success() {
+        return Ok(());
+    }
+    let devices: serde_json::Value = client
+        .get("https://api.spotify.com/v1/me/player/devices")
+        .bearer_auth(&token)
+        .send()
+        .map_err(|e| e.to_string())?
+        .json()
+        .map_err(|e| e.to_string())?;
+    let id = devices["devices"][0]["id"]
+        .as_str()
+        .ok_or("no Spotify device is open — start Spotify somewhere first")?
+        .to_string();
+    let resp = put(Some(&id)).map_err(|e| e.to_string())?;
+    if resp.status().is_success() {
+        Ok(())
+    } else {
+        Err(format!("Spotify said {}", resp.status()))
+    }
+}
+
 /// Find `query` and start playing it. Returns what got put on.
 pub fn play(query: &str) -> Result<String, String> {
     let token = access_token()?;
