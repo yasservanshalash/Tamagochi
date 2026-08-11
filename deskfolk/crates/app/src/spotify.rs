@@ -93,8 +93,12 @@ fn verifier() -> String {
 }
 
 fn open_browser(url: &str) {
-    let _ = std::process::Command::new("cmd")
-        .args(["/C", "start", "", url])
+    // Not `cmd /C start`: cmd splits its line at every unquoted `&`, which
+    // silently truncated the authorize URL at the first query parameter —
+    // Spotify then reported "client_id: Not present". rundll32 hands the URL
+    // to the default browser without any shell parsing in between.
+    let _ = std::process::Command::new("rundll32")
+        .args(["url.dll,FileProtocolHandler", url])
         .spawn();
 }
 
