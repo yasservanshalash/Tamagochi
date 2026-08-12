@@ -29,6 +29,10 @@ pub enum Wish {
     Mute,
     /// Find and play something. Needs the Web API; the keys cannot search.
     Play(String),
+    /// Jump ahead this many seconds in the current track. Web API only.
+    Forward(u32),
+    /// Jump back this many seconds. Web API only.
+    Back(u32),
 }
 
 impl Wish {
@@ -44,7 +48,12 @@ impl Wish {
             "play" => Wish::Play(q.to_string()),
             "play_pause" | "toggle" => Wish::PlayPause,
             "next" | "skip" => Wish::Next,
-            "previous" | "prev" | "back" => Wish::Previous,
+            // "back" with a number is a seek; bare "back" is the prev button.
+            "previous" | "prev" | "back" => match q.parse::<u32>() {
+                Ok(n) if n > 0 => Wish::Back(n.min(600)),
+                _ => Wish::Previous,
+            },
+            "forward" | "ahead" => Wish::Forward(q.parse::<u32>().ok().filter(|n| *n > 0)?.min(600)),
             "louder" | "volume_up" | "up" => Wish::Louder,
             "quieter" | "volume_down" | "down" => Wish::Quieter,
             "mute" | "unmute" => Wish::Mute,
@@ -64,6 +73,8 @@ impl Wish {
             Wish::Quieter => "turned it down".into(),
             Wish::Mute => "muted it".into(),
             Wish::Play(q) => format!("put on {q:?}"),
+            Wish::Forward(n) => format!("jumped ahead {n}s"),
+            Wish::Back(n) => format!("jumped back {n}s"),
         }
     }
 
@@ -83,7 +94,7 @@ impl Wish {
             Wish::Louder => (VK_VOLUME_UP, 5),
             Wish::Quieter => (VK_VOLUME_DOWN, 5),
             Wish::Mute => (VK_VOLUME_MUTE, 1),
-            Wish::Play(_) => return None,
+            Wish::Play(_) | Wish::Forward(_) | Wish::Back(_) => return None,
         })
     }
 }
@@ -123,17 +134,33 @@ pub fn grant(wish: &Wish) -> bool {
             true
         }
         None => {
-            // Only `Play(query)` lands here — the one wish media keys cannot
-            // grant. With a linked Spotify account it becomes search-and-play;
-            // off the caller's thread, because it is two network round-trips.
-            if let Wish::Play(q) = wish {
-                if crate::spotify::connected() {
-                    let q = q.clone();
-                    std::thread::spawn(move || match crate::spotify::play(&q) {
-                        Ok(what) => tracing::info!("music: put on {what}"),
-                        Err(e) => tracing::warn!("music: could not put on {q:?}: {e}"),
-                    });
-                    return true;
+            // Wishes media keys cannot grant: searching, and seeking within a
+            // track. With a linked account they go to the Web API — off the
+            // caller's thread, because each is network round-trips.
+            if crate::spotify::connected() {
+                match wish {
+                    Wish::Play(q) => {
+                        let q = q.clone();
+                        std::thread::spawn(move || match crate::spotify::play(&q) {
+                            Ok(what) => tracing::info!("music: put on {what}"),
+                            Err(e) => tracing::warn!("music: could not put on {q:?}: {e}"),
+                        });
+                        return true;
+                    }
+                    Wish::Forward(n) | Wish::Back(n) => {
+                        let delta = if matches!(wish, Wish::Forward(_)) {
+                            *n as i64
+                        } else {
+                            -(*n as i64)
+                        };
+                        let what = wish.describe();
+                        std::thread::spawn(move || match crate::spotify::seek_by(delta) {
+                            Ok(()) => tracing::info!("music: {what}"),
+                            Err(e) => tracing::warn!("music: could not seek: {e}"),
+                        });
+                        return true;
+                    }
+                    _ => {}
                 }
             }
             tracing::info!("music: {} needs Spotify connected (his menu)", wish.describe());

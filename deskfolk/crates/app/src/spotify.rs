@@ -261,6 +261,36 @@ pub fn resume() -> Result<(), String> {
     }
 }
 
+/// Jump `delta_secs` (negative = back) within the current track.
+pub fn seek_by(delta_secs: i64) -> Result<(), String> {
+    let token = access_token()?;
+    let client = http()?;
+    let resp = client
+        .get("https://api.spotify.com/v1/me/player")
+        .bearer_auth(&token)
+        .send()
+        .map_err(|e| e.to_string())?;
+    if resp.status().as_u16() == 204 {
+        return Err("nothing is playing".into());
+    }
+    let state: serde_json::Value = resp.json().map_err(|e| e.to_string())?;
+    let progress = state["progress_ms"].as_i64().ok_or("nothing is playing")?;
+    let duration = state["item"]["duration_ms"].as_i64().unwrap_or(i64::MAX);
+    // Clamp shy of the very end, or a big jump forward just skips the track.
+    let pos = (progress + delta_secs * 1000).clamp(0, duration.saturating_sub(1_500));
+    let resp = client
+        .put(format!("https://api.spotify.com/v1/me/player/seek?position_ms={pos}"))
+        .bearer_auth(&token)
+        .header("Content-Length", "0")
+        .send()
+        .map_err(|e| e.to_string())?;
+    if resp.status().is_success() {
+        Ok(())
+    } else {
+        Err(format!("Spotify said {}", resp.status()))
+    }
+}
+
 /// Find `query` and start playing it. Returns what got put on.
 pub fn play(query: &str) -> Result<String, String> {
     let token = access_token()?;

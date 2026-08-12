@@ -183,6 +183,12 @@ def _wav_to_pcm16k(wav: bytes) -> bytes:
 
 # Ordered most specific first: "turn it down" must not be read as "play it".
 _MUSIC_INTENTS = [
+    # Seeking must outrank "skip"/"back", or "skip forward 10 seconds" is read
+    # as next-track and "go back 30 seconds" as previous-track.
+    ("forward",  r"(?:\b(?:skip|jump|go|seek)\s+)?\b(?:fast[ -]?forward|forward|ahead)"
+                 r"\s+(?:by\s+)?(?P<fs>\d+)\s*(?:seconds?|secs?)\b"),
+    ("back",     r"\b(?:rewind|(?:go|jump|skip|take\s+it)\s+back|back)"
+                 r"\s+(?:by\s+)?(?P<bs>\d+)\s*(?:seconds?|secs?)\b"),
     ("next",     r"\b(?:skip|next)\b(?:\s+(?:this|the|a|one|it))?\s*"
                  r"(?:song|track|tune|joint)?\b"
                  r"|\b(?:change|switch)\s+(?:the\s+|this\s+|that\s+)?"
@@ -212,6 +218,24 @@ _NOT_A_COMMAND = re.compile(
     r".{0,24}\b(?:play|music|song)\b|\bplaying\b\s+(?:games?|around)", re.I)
 
 
+# Names STT reliably mangles, mapped back to what was meant. The file is
+# user-editable ({"spoken as": "search for"}); matching is case-insensitive
+# substring replace on the play query. "FE!N" will never survive
+# transcription, but "katy payne" -> "Katy Perry" is one line here.
+_ALIAS_PATH = Path(__file__).parent / "music_aliases.json"
+
+
+def _apply_music_aliases(q: str) -> str:
+    try:
+        aliases = json.loads(_ALIAS_PATH.read_text("utf-8"))
+    except Exception:
+        return q
+    for spoken, real in aliases.items():
+        if isinstance(spoken, str) and isinstance(real, str) and spoken.strip():
+            q = re.sub(re.escape(spoken.strip()), real, q, flags=re.I)
+    return q
+
+
 # What he says while doing it. A model asked to skip a track tends to write a
 # paragraph; a person by the speakers says two words and hits the button.
 _MUSIC_ACKS = ["aight bet.", "say less.", "on it — one sec.", "sure, one sec.",
@@ -236,6 +260,9 @@ def music_intent(text: str):
         m = rx.search(t)
         if not m:
             continue
+        if verb in ("forward", "back"):
+            n = m.group("fs" if verb == "forward" else "bs")
+            return {"do": verb, "query": n}
         if verb == "play":
             q = (m.groupdict().get("q") or "").strip(" .!?,")
             # Spoken orders arrive wrapped in filler — "play me something on
@@ -262,6 +289,7 @@ def music_intent(text: str):
             if re.fullmatch(r"(?:some\s+)?(?:music|songs?|tunes?|"
                             r"somethin[g']?|something|anything|whatever)", q, re.I):
                 q = ""
+            q = _apply_music_aliases(q)
             # "play" on its own is the button, not a search.
             return {"do": "play", "query": q} if q else {"do": "resume", "query": ""}
         return {"do": verb, "query": ""}
