@@ -429,8 +429,13 @@ fn converse(
     hour: u8,
     pcm: Vec<u8>,
 ) -> Option<Heard> {
+    // Tell the brain what is on the speakers, so "what song is this?" gets
+    // the truth instead of a confident guess.
+    let playing = crate::music::now_playing()
+        .map(|np| format!("&playing={}", urlenc(&format!("{} — {}", np.artist, np.track))))
+        .unwrap_or_default();
     let url = format!(
-        "{}/pet/converse?screen=desktop-pc&hour={hour}&battery=100&charging=1",
+        "{}/pet/converse?screen=desktop-pc&hour={hour}&battery=100&charging=1{playing}",
         base.trim_end_matches('/')
     );
     tracing::info!("mic: sending {:.1}s of speech", secs(pcm.len()));
@@ -657,6 +662,19 @@ fn speech_bar(floor: u8) -> u8 {
     // a fixed margin — and never below the fixed margin in a quiet one.
     let margin = OVER_FLOOR.max(floor / 4);
     floor.saturating_add(margin).max(MIN_THRESHOLD)
+}
+
+fn urlenc(s: &str) -> String {
+    let mut out = String::new();
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
 }
 
 fn local_hour() -> u8 {

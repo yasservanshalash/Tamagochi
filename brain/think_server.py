@@ -238,9 +238,11 @@ _MUSIC_INTENTS = [
                  r"|\blast (?:song|track)\b|\breplay\b"),
     # Absolute volume must outrank louder/quieter, or "volume to 40" is a
     # nudge. Queue and lyrics outrank play, or "play X next" plays X now.
-    ("volume_set", r"\b(?:set|put|make)\s+(?:the\s+)?volume\s+(?:to|at|on)?\s*"
+    ("volume_set", r"\b(?:set|put|make|turn)\s+(?:up\s+)?(?:the\s+)?volume\s+"
+                   r"(?:up\s+|down\s+)?(?:to|at|on)?\s*"
                    r"(?P<vol>[\w-]+)\s*(?:percent|%)?"
-                   r"|\bvolume\s+(?:to|at)\s+(?P<vol2>[\w-]+)\s*(?:percent|%)?"),
+                   r"|\bvolume\s+(?:up\s+|down\s+)?(?:to|at)\s+"
+                   r"(?P<vol2>[\w-]+)\s*(?:percent|%)?"),
     ("lyrics",   r"\b(?:open|show|pull\s+up|gimme|give\s+me|what\s+are)\s+"
                  r"(?:me\s+)?(?:the\s+)?lyrics\b"),
     ("shuffle_off", r"\b(?:turn\s+)?shuffle\s+off\b|\bturn\s+off\s+shuffle\b"
@@ -359,6 +361,14 @@ def music_intent(text: str):
             # nameable thing; if nothing nameable is left it is just the play
             # button.
             q = re.split(r"[.!?]", q)[0].strip(" ,")
+            # A second command tacked on: "play Goosebumps and open the
+            # lyrics" — take the song; the rest is its own order next turn.
+            q = re.sub(r"\s+and\s+(?:open|show|pull|turn|set|put|crank|"
+                       r"queue|skip)\b.*$", "", q, flags=re.I)
+            # An exclusion: "something like X but not Y" — search must never
+            # contain Y, or Y is exactly what comes back.
+            q = re.sub(r"\s*,?\s*(?:but\s+)?(?:make\s+sure\s+)?(?:it'?s\s+)?"
+                       r"not\s+.+$", "", q, flags=re.I)
             q = re.sub(r"\b(?:on|in|from)\s+spotify\b", "", q, flags=re.I)
             q = re.sub(r"^(?:me|us)\s+", "", q, flags=re.I)
             liked = re.search(r"\b(?:some(?:thing|thin'?)\s*,?\s*)?like\s+(.+)$",
@@ -383,6 +393,23 @@ def music_intent(text: str):
             if re.fullmatch(r"(?:it|that|this|(?:that|this)\s+(?:one|song|track)|"
                             r"it\s+for\s+me|it\s+again)", q, re.I):
                 return None
+            # Artist + year is a Spotify search filter, not a phrase: "Lil Uzi
+            # back in 2014" -> artist:Lil Uzi year:2014. A bare year works the
+            # same way. Without the filters, playlist search free-associates
+            # ("Lil Uzi best songs") and the year is ignored.
+            def year_query(s):
+                ay = re.fullmatch(
+                    r"(?:from\s+)?(?P<art>.+?)\s+(?:back\s+)?(?:in|from)\s+"
+                    r"(?P<yr>(?:19|20)\d{2})", s, re.I)
+                if ay:
+                    return {"do": "play",
+                            "query": f"artist:{ay.group('art')} year:{ay.group('yr')}"}
+                by = re.fullmatch(r"(?:from\s+)?(?:back\s+in\s+)?"
+                                  r"(?P<yr>(?:19|20)\d{2})", s, re.I)
+                if by:
+                    return {"do": "play", "query": f"year:{by.group('yr')}"}
+                return None
+
             # "something <mood/era>" is a request for a vibe he should curate,
             # not a title: "something chill" -> a chill playlist, "something
             # from the 90s" -> a 90s one.
@@ -390,12 +417,18 @@ def music_intent(text: str):
             if mood:
                 rest = re.sub(r"^(?:that'?s?\s+|kinda\s+|a\s+(?:bit|little)\s+)",
                               "", mood.group(1).strip(), flags=re.I)
+                yq = year_query(rest)
+                if yq:
+                    return yq
                 era = re.search(r"\b(?:from\s+)?(?:the\s+)?(\d{2}|\d{4})'?s\b",
                                 rest, re.I)
                 if era:
                     return {"do": "playlist", "query": era.group(1) + "s"}
                 if rest:
                     return {"do": "playlist", "query": rest}
+            yq = year_query(q)
+            if yq:
+                return yq
             # A vibe, not a title: "egyptian music", "some thug music". A
             # title search finds whatever track happens to be *called* that;
             # a playlist is what the sentence means.
@@ -968,6 +1001,9 @@ class Senses(BaseModel):
     person_score: int = -1
     ip: str = ""
     log: str = ""
+    # What Spotify is playing right now, "Artist — Track". Lets him answer
+    # "what song is this?" with the truth instead of a guess.
+    playing: str = ""
 
 class ThinkReq(BaseModel):
     event: str
@@ -1373,7 +1409,8 @@ async def converse(request: Request):
                         energy=int(q.get("energy", 50)),
                         boredom=int(q.get("boredom", 50)),
                         trust=int(q.get("trust", 50))),
-        senses=Senses(screen=q.get("screen", "home")))
+        senses=Senses(screen=q.get("screen", "home"),
+                      playing=q.get("playing", "")))
     out = think(req)
     out["heard"] = heard
     return out
@@ -1455,6 +1492,8 @@ def think(req: ThinkReq):
                 + (" charging" if req.vitals.charging else "")
                 + f" hour={req.vitals.hour}"
                 + f" | screen={req.senses.screen}"
+                + (f" | on the speakers right now: {req.senses.playing}"
+                   if req.senses.playing else "")
                 + (f" | someone visible ({req.senses.person_score}%)"
                    if req.senses.person else "")
                 + f" | stats: mood={mood} paranoia={paranoia}"
