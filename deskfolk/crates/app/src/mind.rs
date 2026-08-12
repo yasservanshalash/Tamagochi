@@ -103,17 +103,20 @@ pub fn obey_music(wish: Option<&deskfolk_ai::MusicWish>) -> Option<&'static str>
         None
     } else {
         journal::trouble(format!("{} — needs the Spotify Web API", parsed.describe()));
-        Some(
-            "ah hold up — I can't put specific songs on yet. \
-             hit Connect Spotify in my menu and then I got you.",
-        )
+        Some(match parsed {
+            music::Wish::YoutubeToggle => "don't see a YouTube tab open anywhere, my guy.",
+            _ => {
+                "ah hold up — I can't put specific songs on yet. \
+                 hit Connect Spotify in my menu and then I got you."
+            }
+        })
     }
 }
 
 /// Do whatever the reply asked of the computer, if anything. Same contract as
-/// [`obey_music`]: a line to speak when it could not be done, because a
-/// "gotchu" followed by nothing happening reads as him lying.
-pub fn obey_computer(wish: Option<&deskfolk_ai::ComputerWish>) -> Option<&'static str> {
+/// [`obey_music`]: a line to speak when it could not be done — or when doing
+/// it has a consequence worth mentioning, like landing on top of a window.
+pub fn obey_computer(wish: Option<&deskfolk_ai::ComputerWish>) -> Option<String> {
     let w = wish?;
     let Some(deed) = computer::Deed::parse(&w.r#do, &w.arg) else {
         if !w.r#do.trim().is_empty() {
@@ -121,12 +124,31 @@ pub fn obey_computer(wish: Option<&deskfolk_ai::ComputerWish>) -> Option<&'stati
         }
         return None;
     };
+    // Teleporting reports what he lands on, so it is handled apart.
+    if let computer::Deed::GotoScreen(region) = &deed {
+        return match computer::goto_screen(region) {
+            Ok(Some(over)) => {
+                tracing::info!("computer: {} (over {over:?})", deed.describe());
+                journal::did(deed.describe());
+                Some(format!(
+                    "aight, I'm over there — heads up though, I'm sitting on {over} now."
+                ))
+            }
+            Ok(None) => {
+                tracing::info!("computer: {}", deed.describe());
+                journal::did(deed.describe());
+                None
+            }
+            Err(()) => Some("tried to jump over there but my window's acting up.".into()),
+        };
+    }
     if computer::grant(&deed) {
+        tracing::info!("computer: {}", deed.describe());
         journal::did(deed.describe());
         None
     } else {
         journal::trouble(format!("{} — could not", deed.describe()));
-        Some("hm, I don't see that window anywhere, my guy.")
+        Some("hm, I don't see that window anywhere, my guy.".into())
     }
 }
 
@@ -220,7 +242,7 @@ pub fn ask(
                     voice.speak(excuse);
                 }
                 if let Some(excuse) = obey_computer(reply.computer.as_ref()) {
-                    voice.speak(excuse);
+                    voice.speak(&excuse);
                 }
                 journal::said(journal::Said {
                     event: event.clone(),

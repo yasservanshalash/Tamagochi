@@ -47,6 +47,12 @@ pub enum Wish {
     Queue(String),
     /// Open the lyrics of what is playing in the browser.
     Lyrics,
+    /// Pause Spotify specifically, via the API — the media key hits whatever
+    /// player is the active session, which with a YouTube tab open is not it.
+    PauseSpotify,
+    /// Toggle the YouTube tab's playback: focus it and press its own
+    /// play/pause key. The only way to aim transport at the browser.
+    YoutubeToggle,
 }
 
 impl Wish {
@@ -77,6 +83,8 @@ impl Wish {
             "repeat_off" => Wish::Repeat(false),
             "queue" if !q.is_empty() => Wish::Queue(q.to_string()),
             "lyrics" => Wish::Lyrics,
+            "pause_spotify" => Wish::PauseSpotify,
+            "youtube_toggle" | "pause_youtube" | "resume_youtube" => Wish::YoutubeToggle,
             "louder" | "volume_up" | "up" => Wish::Louder,
             "quieter" | "volume_down" | "down" => Wish::Quieter,
             "mute" | "unmute" => Wish::Mute,
@@ -107,6 +115,8 @@ impl Wish {
             Wish::Repeat(false) => "took it off repeat".into(),
             Wish::Queue(q) => format!("queued up {q:?}"),
             Wish::Lyrics => "opened the lyrics".into(),
+            Wish::PauseSpotify => "paused Spotify".into(),
+            Wish::YoutubeToggle => "worked the YouTube tab".into(),
         }
     }
 
@@ -128,7 +138,8 @@ impl Wish {
             Wish::Mute => (VK_VOLUME_MUTE, 1),
             Wish::Play(_) | Wish::Forward(_) | Wish::Back(_) | Wish::SeekTo(_)
             | Wish::Playlist(_) | Wish::VolumeSet(_) | Wish::Shuffle(_)
-            | Wish::Repeat(_) | Wish::Queue(_) | Wish::Lyrics => return None,
+            | Wish::Repeat(_) | Wish::Queue(_) | Wish::Lyrics
+            | Wish::PauseSpotify | Wish::YoutubeToggle => return None,
         })
     }
 }
@@ -168,6 +179,10 @@ pub fn grant(wish: &Wish) -> bool {
             true
         }
         None => {
+            // The browser tab needs no account at all — just a window.
+            if matches!(wish, Wish::YoutubeToggle) {
+                return crate::computer::youtube_toggle();
+            }
             // Wishes media keys cannot grant: searching, and seeking within a
             // track. With a linked account they go to the Web API — off the
             // caller's thread, because each is network round-trips.
@@ -255,6 +270,13 @@ pub fn grant(wish: &Wish) -> bool {
                         });
                         return true;
                     }
+                    Wish::PauseSpotify => {
+                        std::thread::spawn(|| match crate::spotify::pause() {
+                            Ok(()) => tracing::info!("music: paused Spotify via the Web API"),
+                            Err(e) => tracing::warn!("music: could not pause Spotify: {e}"),
+                        });
+                        return true;
+                    }
                     _ => {}
                 }
             }
@@ -265,7 +287,7 @@ pub fn grant(wish: &Wish) -> bool {
 }
 
 #[cfg(windows)]
-fn press(vk: u16) {
+pub(crate) fn press(vk: u16) {
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
         SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, KEYBD_EVENT_FLAGS,
     };
@@ -294,7 +316,7 @@ fn press(vk: u16) {
 }
 
 #[cfg(not(windows))]
-fn press(_vk: u16) {}
+pub(crate) fn press(_vk: u16) {}
 
 /// What is playing, as far as we can tell without an account.
 #[derive(Debug, Clone, PartialEq, Eq)]

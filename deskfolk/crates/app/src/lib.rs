@@ -588,7 +588,7 @@ pub(crate) fn boot_companion(app: &AppHandle) -> anyhow::Result<()> {
                 voice.speak(excuse);
             }
             if let Some(excuse) = mind::obey_computer(h.computer.as_ref()) {
-                voice.speak(excuse);
+                voice.speak(&excuse);
             }
             // A movement he was told to make (or chose): route it to the wander
             // loop. Not mutually exclusive with speaking — he can say "aight"

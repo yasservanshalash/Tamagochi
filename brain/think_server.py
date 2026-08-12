@@ -207,6 +207,16 @@ _AMT = r"[\w-]+"   # a digit run or a number word; validated by _num afterwards
 
 # Ordered most specific first: "turn it down" must not be read as "play it".
 _MUSIC_INTENTS = [
+    # Player-targeted transport first of all. The media key hits whichever
+    # player is the active session — with a YouTube tab open, "pause spotify"
+    # paused the video and "unpause youtube" resumed Spotify. Naming the
+    # player must aim the command at it.
+    ("youtube_toggle", r"\b(?:pause|unpause|stop|resume|play|start)\s+"
+                       r"(?:the\s+)?(?:youtube|video)\b"
+                       r"|\b(?:pause|play|unpause)\s+(?:it\s+)?(?:on|in)\s+"
+                       r"the\s+(?:browser|tab)\b"),
+    ("pause_spotify",  r"\b(?:pause|stop|kill)\s+(?:the\s+)?spotify\b"),
+    ("resume",         r"\b(?:unpause|resume|start)\s+(?:the\s+)?spotify\b"),
     # Seeking must outrank "skip"/"back", or "skip forward 10 seconds" is read
     # as next-track and "go back 30 seconds" as previous-track. Absolute
     # positions ("skip to the 2nd minute", "go to 1:30") come first of all.
@@ -495,13 +505,29 @@ def body_intent(text: str):
 # same reason as the music. Ordered most specific first; the app validates the
 # verb again against a closed enum, so a stray match is a no-op, not a hazard.
 _COMPUTER_INTENTS = [
+    # Dictation and clipboard first: their arg is free text and must not be
+    # nibbled by the other patterns.
+    ("clipboard", r"\bcopy\s+(?P<cb>.+?)\s+(?:to|onto|on|in)\s+(?:the\s+|my\s+)?clipboard\b"
+                  r"|\b(?:save|put)\s+(?:this\s+)?(?:to|on|in|onto)\s+"
+                  r"(?:the\s+|my\s+)?clipboard[:,]?\s*(?P<cb2>.*)$"),
+    ("type",      r"\btype\s+(?!beats?\b)(?:this[:,]?\s+|out\s+)?(?P<tx>.+)$"
+                  r"|\bwrite\s+(?:this\s+)?(?:down|out)[:,]?\s+(?P<tx2>.+)$"
+                  r"|\bdictate[:,]?\s+(?P<tx3>.+)$"),
+    ("show_desktop", r"\bshow\s+(?:me\s+)?(?:the\s+)?desktop\b"
+                     r"|\bminimi[sz]e\s+(?:everything|all(?:\s+(?:the\s+)?windows)?)\b"
+                     r"|\bclear\s+the\s+screen\b"),
+    ("goto_screen", r"\b(?:go|teleport|move|jump|instant\s+transmission)\s+"
+                    r"(?:over\s+)?to\s+(?:the\s+)?"
+                    r"(?P<corner>(?:top|bottom|upper|lower)(?:\s+(?:left|right))?"
+                    r"|left|right|center|middle)"
+                    r"(?:\s+(?:corner\s+)?(?:of\s+)?(?:the\s+)?(?:screen|desktop))?\s*$"),
     ("youtube",  r"\b(?:play|search(?:\s+for)?|find|put\s+on)\s+(?P<yt>.+?)\s+on\s+youtube\b"
                  r"|\bsearch\s+youtube\s+for\s+(?P<yt2>.+)$"
                  r"|\byoutube\s+search\s+(?P<yt3>.+)$"),
-    ("open_url", r"\b(?:open|pull\s+up|go\s+to|take\s+me\s+to)\s+"
+    ("open_url", r"\b(?:open|pull\s+up|go\s+to|take\s+me\s+to)\s+(?:up\s+)?"
                  r"(?:the\s+)?(?:website\s+|site\s+)?(?P<site>[\w.-]+(?:\.[a-z]{2,})?)"
                  r"(?:\s*(?:\.com|dot\s+com))?\s*$"),
-    ("search",   r"\b(?:google|search\s+(?:the\s+web\s+)?for|look\s+up|search\s+up)\s+"
+    ("search",   r"\b(?:google|search\s+(?:the\s+web\s+)?for|look\s+up|search\s+up)[,:\s]+"
                  r"(?P<q>.+)$"),
     ("focus",    r"\b(?:switch|go)\s+(?:back\s+)?to\s+(?:the\s+)?(?P<fw>.+?)"
                  r"(?:\s+(?:window|tab|app))?\s*$"
@@ -523,7 +549,7 @@ _NOT_A_COMPUTER_CMD = re.compile(
 _KNOWN_SITES = {"youtube", "google", "gmail", "github", "reddit", "twitter",
                 "x", "instagram", "twitch", "netflix", "wikipedia", "chatgpt",
                 "claude", "notepad", "calculator", "calc", "explorer",
-                "spotify", "settings"}
+                "spotify", "settings", "discord"}
 
 
 def computer_intent(text: str):
@@ -541,6 +567,20 @@ def computer_intent(text: str):
         m = rx.search(t)
         if not m:
             continue
+        if verb == "clipboard":
+            txt = (m.group("cb") or m.group("cb2") or "").strip(" .!?,")
+            # "save this to clipboard" with nothing after: the caller fills in
+            # his own last line, so a dictated reply can be carried out.
+            return {"do": "clipboard", "arg": txt}
+        if verb == "type":
+            txt = (m.group("tx") or m.group("tx2") or m.group("tx3") or "").strip()
+            if not txt:
+                continue
+            return {"do": "type", "arg": txt}
+        if verb == "show_desktop":
+            return {"do": "show_desktop", "arg": ""}
+        if verb == "goto_screen":
+            return {"do": "goto_screen", "arg": m.group("corner").strip()}
         if verb == "youtube":
             q = (m.group("yt") or m.group("yt2") or m.group("yt3") or "").strip(" .!?,")
             if not q:
@@ -575,10 +615,12 @@ def computer_intent(text: str):
             continue
         if verb == "close":
             w = (m.group("cw") or "").strip(" .!?,")
-            # "close it/this" needs a name — the app matches by title.
-            if not w or re.fullmatch(r"(?:it|this|that|them|your\s+eyes?|the\s+door)",
-                                     w, re.I):
+            if not w or re.fullmatch(r"(?:them|your\s+eyes?|the\s+door)", w, re.I):
                 continue
+            # "close this (tab/window)" means whatever the user is inside.
+            if re.fullmatch(r"(?:it|this|that|current)(?:\s+(?:tab|window|app|one))?",
+                            w, re.I):
+                return {"do": "close", "arg": "focused"}
             return {"do": "close", "arg": w}
     return None
 
@@ -947,9 +989,12 @@ COMPUTER: you can also work the computer itself. To do it, add a "computer"
 field to your JSON: {"do": "<verb>", "arg": "<target>"} with verbs open_url
 (arg is a site or URL), search (web search), youtube (search YouTube), focus
 (bring a window to the front, arg is part of its title), minimize, close,
-open_app (notepad/calculator/explorer/spotify/settings only). You are told
-what windows are open and which is focused — use those real titles as args.
-Only include the field when he actually wants it done.
+open_app (notepad/calculator/explorer/spotify/settings/discord only), type
+(dictate arg into the focused window), clipboard (put arg on the clipboard),
+show_desktop (minimize everything), goto_screen (teleport yourself; arg like
+"top right"). You are told what windows are open and which is focused — use
+those real titles as args. Only include the field when he actually wants it
+done.
 
 TRIPPING: RARELY — roughly one reply in eight, not most of them — a thought
 gets away from you mid-sentence and goes somewhere strange. When it does,
@@ -1705,6 +1750,19 @@ def think(req: ThinkReq):
         if isinstance(volunteered, dict) and str(volunteered.get("do", "")).strip():
             computer = {"do": str(volunteered.get("do", "")),
                         "arg": str(volunteered.get("arg", volunteered.get("query", "")))}
+    # "save that to clipboard" with nothing quoted: what he just said is the
+    # thing being saved — the whole point of dictating to him from the couch.
+    if computer and computer.get("do") == "clipboard" and not computer.get("arg"):
+        for t in reversed(mem.get("turns", [])):
+            try:
+                last = json.loads(t["a"]).get("say", "")
+            except Exception:
+                continue
+            if last and not _is_failure_line(last):
+                computer["arg"] = last
+                break
+        if not computer.get("arg"):
+            computer = None
 
     say = _clip(str(out.get("say", FAILURE_LINE)),
                 SAY_LIMIT)

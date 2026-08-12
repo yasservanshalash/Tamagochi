@@ -326,6 +326,12 @@ fn player_put(path_and_query: &str) -> Result<(), String> {
     }
 }
 
+/// Pause playback — the API form, which unlike the media key is aimed at
+/// Spotify itself rather than whichever player is the active session.
+pub fn pause() -> Result<(), String> {
+    player_put("pause")
+}
+
 /// Set the player volume to an exact percentage.
 pub fn set_volume(percent: u8) -> Result<(), String> {
     player_put(&format!("volume?volume_percent={}", percent.min(100)))
