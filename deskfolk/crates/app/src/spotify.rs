@@ -309,6 +309,65 @@ fn seek(target: SeekWhere) -> Result<(), String> {
     }
 }
 
+/// Find a playlist for `query` and start it. Returns the playlist's name.
+pub fn play_playlist(query: &str) -> Result<String, String> {
+    let token = access_token()?;
+    let client = http()?;
+    let search: serde_json::Value = client
+        .get(format!(
+            "https://api.spotify.com/v1/search?q={}&type=playlist&limit=5",
+            urlenc(query)
+        ))
+        .bearer_auth(&token)
+        .send()
+        .map_err(|e| e.to_string())?
+        .json()
+        .map_err(|e| e.to_string())?;
+    // The items array can contain literal nulls; take the first real one.
+    let lists = search["playlists"]["items"].as_array().cloned().unwrap_or_default();
+    let list = lists
+        .iter()
+        .find(|p| p["uri"].as_str().is_some())
+        .ok_or_else(|| format!("no playlist found for {query:?}"))?;
+    let uri = list["uri"].as_str().unwrap_or_default().to_string();
+    let name = list["name"].as_str().unwrap_or(query).to_string();
+
+    let body = serde_json::json!({ "context_uri": uri }).to_string();
+    let put = |device: Option<&str>| {
+        let url = match device {
+            Some(id) => format!("https://api.spotify.com/v1/me/player/play?device_id={id}"),
+            None => "https://api.spotify.com/v1/me/player/play".into(),
+        };
+        client
+            .put(url)
+            .bearer_auth(&token)
+            .header("Content-Type", "application/json")
+            .body(body.clone())
+            .send()
+    };
+    let resp = put(None).map_err(|e| e.to_string())?;
+    if resp.status().is_success() {
+        return Ok(name);
+    }
+    let devices: serde_json::Value = client
+        .get("https://api.spotify.com/v1/me/player/devices")
+        .bearer_auth(&token)
+        .send()
+        .map_err(|e| e.to_string())?
+        .json()
+        .map_err(|e| e.to_string())?;
+    let id = devices["devices"][0]["id"]
+        .as_str()
+        .ok_or("no Spotify device is open — start Spotify somewhere first")?
+        .to_string();
+    let resp = put(Some(&id)).map_err(|e| e.to_string())?;
+    if resp.status().is_success() {
+        Ok(name)
+    } else {
+        Err(format!("Spotify said {}", resp.status()))
+    }
+}
+
 /// Find `query` and start playing it. Returns what got put on.
 pub fn play(query: &str) -> Result<String, String> {
     let token = access_token()?;

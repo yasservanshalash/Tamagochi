@@ -342,10 +342,23 @@ def music_intent(text: str):
             q = re.sub(r",?\s*\b(?:like|tho|though|man|fam|bro|please|pls|"
                        r"right now|now)\s*$", "", q, flags=re.I)
             q = q.strip(" .!?,")
-            if re.fullmatch(r"(?:some\s+)?(?:music|songs?|tunes?|"
+            if re.fullmatch(r"some|(?:some\s+)?(?:music|songs?|tunes?|"
                             r"somethin[g']?|something|anything|whatever)", q, re.I):
                 q = ""
             q = _apply_music_aliases(q)
+            # "play it" after talking about a song is not a search for "it" —
+            # only the model knows what "it" was, so leave the field to it.
+            if re.fullmatch(r"(?:it|that|this|(?:that|this)\s+(?:one|song|track)|"
+                            r"it\s+for\s+me|it\s+again)", q, re.I):
+                return None
+            # A vibe, not a title: "egyptian music", "some thug music". A
+            # title search finds whatever track happens to be *called* that;
+            # a playlist is what the sentence means.
+            vibe = re.fullmatch(r"(?:an?\s+|the\s+)?(.+?)\s+"
+                                r"(?:music|songs?|vibes?|playlist|type\s+beats?)",
+                                q, re.I)
+            if vibe:
+                return {"do": "playlist", "query": vibe.group(1)}
             # "play" on its own is the button, not a search.
             return {"do": "play", "query": q} if q else {"do": "resume", "query": ""}
         return {"do": verb, "query": ""}

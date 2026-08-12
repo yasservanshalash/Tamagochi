@@ -35,6 +35,8 @@ pub enum Wish {
     Back(u32),
     /// Jump to an absolute position, in seconds from the start. Web API only.
     SeekTo(u32),
+    /// Put on a playlist matching a vibe ("egyptian", "thug"). Web API only.
+    Playlist(String),
 }
 
 impl Wish {
@@ -57,6 +59,7 @@ impl Wish {
             },
             "forward" | "ahead" => Wish::Forward(q.parse::<u32>().ok().filter(|n| *n > 0)?.min(600)),
             "seek_to" | "goto" => Wish::SeekTo(q.parse::<u32>().ok()?.min(3600)),
+            "playlist" if !q.is_empty() => Wish::Playlist(q.to_string()),
             "louder" | "volume_up" | "up" => Wish::Louder,
             "quieter" | "volume_down" | "down" => Wish::Quieter,
             "mute" | "unmute" => Wish::Mute,
@@ -79,6 +82,7 @@ impl Wish {
             Wish::Forward(n) => format!("jumped ahead {n}s"),
             Wish::Back(n) => format!("jumped back {n}s"),
             Wish::SeekTo(n) => format!("jumped to {}:{:02}", n / 60, n % 60),
+            Wish::Playlist(q) => format!("put on a {q} playlist"),
         }
     }
 
@@ -98,7 +102,8 @@ impl Wish {
             Wish::Louder => (VK_VOLUME_UP, 5),
             Wish::Quieter => (VK_VOLUME_DOWN, 5),
             Wish::Mute => (VK_VOLUME_MUTE, 1),
-            Wish::Play(_) | Wish::Forward(_) | Wish::Back(_) | Wish::SeekTo(_) => return None,
+            Wish::Play(_) | Wish::Forward(_) | Wish::Back(_) | Wish::SeekTo(_)
+            | Wish::Playlist(_) => return None,
         })
     }
 }
@@ -148,6 +153,20 @@ pub fn grant(wish: &Wish) -> bool {
                         std::thread::spawn(move || match crate::spotify::play(&q) {
                             Ok(what) => tracing::info!("music: put on {what}"),
                             Err(e) => tracing::warn!("music: could not put on {q:?}: {e}"),
+                        });
+                        return true;
+                    }
+                    Wish::Playlist(q) => {
+                        let q = q.clone();
+                        std::thread::spawn(move || match crate::spotify::play_playlist(&q) {
+                            Ok(what) => tracing::info!("music: put on playlist {what}"),
+                            Err(e) => {
+                                tracing::warn!("music: no {q:?} playlist ({e}); trying a track");
+                                match crate::spotify::play(&q) {
+                                    Ok(what) => tracing::info!("music: put on {what}"),
+                                    Err(e) => tracing::warn!("music: could not put on {q:?}: {e}"),
+                                }
+                            }
                         });
                         return true;
                     }
