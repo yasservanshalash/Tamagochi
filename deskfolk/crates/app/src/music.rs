@@ -37,6 +37,16 @@ pub enum Wish {
     SeekTo(u32),
     /// Put on a playlist matching a vibe ("egyptian", "thug"). Web API only.
     Playlist(String),
+    /// Set the player volume to an exact percentage. Web API only.
+    VolumeSet(u8),
+    /// Shuffle on or off. Web API only.
+    Shuffle(bool),
+    /// Repeat the current track, or stop repeating. Web API only.
+    Repeat(bool),
+    /// Add a track to the queue without interrupting what plays. Web API only.
+    Queue(String),
+    /// Open the lyrics of what is playing in the browser.
+    Lyrics,
 }
 
 impl Wish {
@@ -60,6 +70,13 @@ impl Wish {
             "forward" | "ahead" => Wish::Forward(q.parse::<u32>().ok().filter(|n| *n > 0)?.min(600)),
             "seek_to" | "goto" => Wish::SeekTo(q.parse::<u32>().ok()?.min(3600)),
             "playlist" if !q.is_empty() => Wish::Playlist(q.to_string()),
+            "volume_set" => Wish::VolumeSet(q.parse::<u8>().ok()?.min(100)),
+            "shuffle_on" => Wish::Shuffle(true),
+            "shuffle_off" => Wish::Shuffle(false),
+            "repeat_on" => Wish::Repeat(true),
+            "repeat_off" => Wish::Repeat(false),
+            "queue" if !q.is_empty() => Wish::Queue(q.to_string()),
+            "lyrics" => Wish::Lyrics,
             "louder" | "volume_up" | "up" => Wish::Louder,
             "quieter" | "volume_down" | "down" => Wish::Quieter,
             "mute" | "unmute" => Wish::Mute,
@@ -83,6 +100,13 @@ impl Wish {
             Wish::Back(n) => format!("jumped back {n}s"),
             Wish::SeekTo(n) => format!("jumped to {}:{:02}", n / 60, n % 60),
             Wish::Playlist(q) => format!("put on a {q} playlist"),
+            Wish::VolumeSet(p) => format!("set the volume to {p}%"),
+            Wish::Shuffle(true) => "turned shuffle on".into(),
+            Wish::Shuffle(false) => "turned shuffle off".into(),
+            Wish::Repeat(true) => "put it on repeat".into(),
+            Wish::Repeat(false) => "took it off repeat".into(),
+            Wish::Queue(q) => format!("queued up {q:?}"),
+            Wish::Lyrics => "opened the lyrics".into(),
         }
     }
 
@@ -103,7 +127,8 @@ impl Wish {
             Wish::Quieter => (VK_VOLUME_DOWN, 5),
             Wish::Mute => (VK_VOLUME_MUTE, 1),
             Wish::Play(_) | Wish::Forward(_) | Wish::Back(_) | Wish::SeekTo(_)
-            | Wish::Playlist(_) => return None,
+            | Wish::Playlist(_) | Wish::VolumeSet(_) | Wish::Shuffle(_)
+            | Wish::Repeat(_) | Wish::Queue(_) | Wish::Lyrics => return None,
         })
     }
 }
@@ -188,6 +213,45 @@ pub fn grant(wish: &Wish) -> bool {
                         std::thread::spawn(move || match crate::spotify::seek_to(n) {
                             Ok(()) => tracing::info!("music: {what}"),
                             Err(e) => tracing::warn!("music: could not seek: {e}"),
+                        });
+                        return true;
+                    }
+                    Wish::VolumeSet(p) => {
+                        let (p, what) = (*p, wish.describe());
+                        std::thread::spawn(move || match crate::spotify::set_volume(p) {
+                            Ok(()) => tracing::info!("music: {what}"),
+                            Err(e) => tracing::warn!("music: could not set volume: {e}"),
+                        });
+                        return true;
+                    }
+                    Wish::Shuffle(on) => {
+                        let (on, what) = (*on, wish.describe());
+                        std::thread::spawn(move || match crate::spotify::shuffle(on) {
+                            Ok(()) => tracing::info!("music: {what}"),
+                            Err(e) => tracing::warn!("music: could not set shuffle: {e}"),
+                        });
+                        return true;
+                    }
+                    Wish::Repeat(on) => {
+                        let (on, what) = (*on, wish.describe());
+                        std::thread::spawn(move || match crate::spotify::repeat(on) {
+                            Ok(()) => tracing::info!("music: {what}"),
+                            Err(e) => tracing::warn!("music: could not set repeat: {e}"),
+                        });
+                        return true;
+                    }
+                    Wish::Queue(q) => {
+                        let q = q.clone();
+                        std::thread::spawn(move || match crate::spotify::queue(&q) {
+                            Ok(what) => tracing::info!("music: queued {what}"),
+                            Err(e) => tracing::warn!("music: could not queue {q:?}: {e}"),
+                        });
+                        return true;
+                    }
+                    Wish::Lyrics => {
+                        std::thread::spawn(|| match crate::spotify::open_lyrics() {
+                            Ok(what) => tracing::info!("music: lyrics for {what}"),
+                            Err(e) => tracing::warn!("music: could not open lyrics: {e}"),
                         });
                         return true;
                     }

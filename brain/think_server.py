@@ -224,6 +224,10 @@ _MUSIC_INTENTS = [
                  r"\s+(?:by\s+)?(?P<fs>" + _AMT + r")\s*(?P<fu>minutes?|mins?|seconds?|secs?)\b"),
     ("back",     r"\b(?:rewind|(?:go|jump|skip|take\s+it)\s+back|back)"
                  r"\s+(?:by\s+)?(?P<bs>" + _AMT + r")\s*(?P<bu>minutes?|mins?|seconds?|secs?)\b"),
+    # Queue must outrank "next", or "play sicko mode next" skips a track.
+    ("queue",    r"\bqueue\s+(?:up\s+)?(?P<qq>.+)$"
+                 r"|\badd\s+(?P<qa>.+?)\s+to\s+(?:the\s+)?queue\b"
+                 r"|\bplay\s+(?P<qn>.+?)\s+next\b"),
     ("next",     r"\b(?:skip|next)\b(?:\s+(?:this|the|a|one|it))?\s*"
                  r"(?:song|track|tune|joint)?\b"
                  r"|\b(?:change|switch)\s+(?:the\s+|this\s+|that\s+)?"
@@ -232,6 +236,23 @@ _MUSIC_INTENTS = [
                  r"|\b(?:put|throw)\s+(?:on\s+)?something else\b|\bsomething else\b"),
     ("previous", r"\b(?:previous|prev)\b|\bgo back\b|\bback (?:a|one) (?:song|track)\b"
                  r"|\blast (?:song|track)\b|\breplay\b"),
+    # Absolute volume must outrank louder/quieter, or "volume to 40" is a
+    # nudge. Queue and lyrics outrank play, or "play X next" plays X now.
+    ("volume_set", r"\b(?:set|put|make)\s+(?:the\s+)?volume\s+(?:to|at|on)?\s*"
+                   r"(?P<vol>[\w-]+)\s*(?:percent|%)?"
+                   r"|\bvolume\s+(?:to|at)\s+(?P<vol2>[\w-]+)\s*(?:percent|%)?"),
+    ("lyrics",   r"\b(?:open|show|pull\s+up|gimme|give\s+me|what\s+are)\s+"
+                 r"(?:me\s+)?(?:the\s+)?lyrics\b"),
+    ("shuffle_off", r"\b(?:turn\s+)?shuffle\s+off\b|\bturn\s+off\s+shuffle\b"
+                    r"|\bdisable\s+shuffle\b|\bstop\s+shuffling\b"),
+    ("shuffle_on",  r"\b(?:turn\s+)?shuffle\s+on\b|\bturn\s+on\s+shuffle\b"
+                    r"|\benable\s+shuffle\b|\bput\s+it\s+on\s+shuffle\b"
+                    r"|\bshuffle\s+(?:it|this|the\s+(?:music|queue|playlist))\b"),
+    ("repeat_off",  r"\bstop\s+(?:repeating|looping)\b|\b(?:repeat|loop)\s+off\b"
+                    r"|\bturn\s+off\s+(?:repeat|loop)\b"),
+    ("repeat_on",   r"\b(?:put\s+)?(?:this\s+(?:song|track)|it|that)\s+on\s+"
+                    r"(?:repeat|loop)\b|\brepeat\s+(?:this|it|the\s+song)\b"
+                    r"|\bloop\s+(?:this|it)\b"),
     ("louder",   r"\bturn (?:it|the (?:music|volume)) up\b|\blouder\b|\bvolume up\b"
                  r"|\bcrank (?:it|this)\b|\bpump it\b"),
     ("quieter",  r"\bturn (?:it|the (?:music|volume)) down\b|\bquieter\b|\bvolume down\b"
@@ -319,6 +340,17 @@ def music_intent(text: str):
             if (m.group("fu" if verb == "forward" else "bu") or "").startswith("min"):
                 v *= 60
             return {"do": verb, "query": str(v)}
+        if verb == "volume_set":
+            v = _num(m.group("vol") or m.group("vol2"))
+            if v is None:
+                continue     # "turn the volume up" falls through to louder
+            return {"do": "volume_set", "query": str(min(v, 100))}
+        if verb == "queue":
+            qq = (m.group("qq") or m.group("qa") or m.group("qn") or "").strip(" .!?,")
+            qq = _apply_music_aliases(qq)
+            if not qq:
+                continue
+            return {"do": "queue", "query": qq}
         if verb == "play":
             q = (m.groupdict().get("q") or "").strip(" .!?,")
             # Spoken orders arrive wrapped in filler — "play me something on
@@ -351,11 +383,24 @@ def music_intent(text: str):
             if re.fullmatch(r"(?:it|that|this|(?:that|this)\s+(?:one|song|track)|"
                             r"it\s+for\s+me|it\s+again)", q, re.I):
                 return None
+            # "something <mood/era>" is a request for a vibe he should curate,
+            # not a title: "something chill" -> a chill playlist, "something
+            # from the 90s" -> a 90s one.
+            mood = re.match(r"^something\s+(.+)$", q, re.I)
+            if mood:
+                rest = re.sub(r"^(?:that'?s?\s+|kinda\s+|a\s+(?:bit|little)\s+)",
+                              "", mood.group(1).strip(), flags=re.I)
+                era = re.search(r"\b(?:from\s+)?(?:the\s+)?(\d{2}|\d{4})'?s\b",
+                                rest, re.I)
+                if era:
+                    return {"do": "playlist", "query": era.group(1) + "s"}
+                if rest:
+                    return {"do": "playlist", "query": rest}
             # A vibe, not a title: "egyptian music", "some thug music". A
             # title search finds whatever track happens to be *called* that;
             # a playlist is what the sentence means.
             vibe = re.fullmatch(r"(?:an?\s+|the\s+)?(.+?)\s+"
-                                r"(?:music|songs?|vibes?|playlist|type\s+beats?)",
+                                r"(?:music|songs?|vibes?|playlist|type\s+beats?|hits)",
                                 q, re.I)
             if vibe:
                 return {"do": "playlist", "query": vibe.group(1)}

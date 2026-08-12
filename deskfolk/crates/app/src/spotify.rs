@@ -309,6 +309,96 @@ fn seek(target: SeekWhere) -> Result<(), String> {
     }
 }
 
+/// One bodyless player PUT (volume, shuffle, repeat all look like this).
+fn player_put(path_and_query: &str) -> Result<(), String> {
+    let token = access_token()?;
+    let client = http()?;
+    let resp = client
+        .put(format!("https://api.spotify.com/v1/me/player/{path_and_query}"))
+        .bearer_auth(&token)
+        .header("Content-Length", "0")
+        .send()
+        .map_err(|e| e.to_string())?;
+    if resp.status().is_success() {
+        Ok(())
+    } else {
+        Err(format!("Spotify said {}", resp.status()))
+    }
+}
+
+/// Set the player volume to an exact percentage.
+pub fn set_volume(percent: u8) -> Result<(), String> {
+    player_put(&format!("volume?volume_percent={}", percent.min(100)))
+}
+
+/// Shuffle on or off.
+pub fn shuffle(on: bool) -> Result<(), String> {
+    player_put(&format!("shuffle?state={on}"))
+}
+
+/// Repeat the current track, or stop repeating.
+pub fn repeat(on: bool) -> Result<(), String> {
+    player_put(&format!("repeat?state={}", if on { "track" } else { "off" }))
+}
+
+/// Find `query` and add it to the queue, leaving what plays alone.
+pub fn queue(query: &str) -> Result<String, String> {
+    let token = access_token()?;
+    let client = http()?;
+    let search: serde_json::Value = client
+        .get(format!(
+            "https://api.spotify.com/v1/search?q={}&type=track&limit=1",
+            urlenc(query)
+        ))
+        .bearer_auth(&token)
+        .send()
+        .map_err(|e| e.to_string())?
+        .json()
+        .map_err(|e| e.to_string())?;
+    let track = &search["tracks"]["items"][0];
+    let uri = track["uri"].as_str().ok_or_else(|| format!("nothing found for {query:?}"))?;
+    let label = format!(
+        "{} — {}",
+        track["artists"][0]["name"].as_str().unwrap_or("?"),
+        track["name"].as_str().unwrap_or(query),
+    );
+    let resp = client
+        .post(format!("https://api.spotify.com/v1/me/player/queue?uri={}", urlenc(uri)))
+        .bearer_auth(&token)
+        .header("Content-Length", "0")
+        .send()
+        .map_err(|e| e.to_string())?;
+    if resp.status().is_success() {
+        Ok(label)
+    } else {
+        Err(format!("Spotify said {}", resp.status()))
+    }
+}
+
+/// Open the lyrics of what is currently playing, via a Genius search in the
+/// browser — Spotify has no public lyrics API.
+pub fn open_lyrics() -> Result<String, String> {
+    let token = access_token()?;
+    let client = http()?;
+    let resp = client
+        .get("https://api.spotify.com/v1/me/player")
+        .bearer_auth(&token)
+        .send()
+        .map_err(|e| e.to_string())?;
+    if resp.status().as_u16() == 204 {
+        return Err("nothing is playing".into());
+    }
+    let state: serde_json::Value = resp.json().map_err(|e| e.to_string())?;
+    let track = state["item"]["name"].as_str().ok_or("nothing is playing")?;
+    let artist = state["item"]["artists"][0]["name"].as_str().unwrap_or("");
+    let label = format!("{artist} — {track}");
+    open_browser(&format!(
+        "https://genius.com/search?q={}",
+        urlenc(&format!("{artist} {track}"))
+    ));
+    Ok(label)
+}
+
 /// Find a playlist for `query` and start it. Returns the playlist's name.
 pub fn play_playlist(query: &str) -> Result<String, String> {
     let token = access_token()?;
