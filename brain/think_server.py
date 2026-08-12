@@ -181,14 +181,44 @@ def _wav_to_pcm16k(wav: bytes) -> bytes:
          "-ac", "1", "pipe:1"],
         input=wav, timeout=30, capture_output=True, check=True).stdout
 
+# STT writes small numbers as words as often as digits, so every amount is
+# parsed through this rather than \d+.
+_NUM_WORDS = {
+    "a": 1, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6,
+    "seven": 7, "eight": 8, "nine": 9, "ten": 10, "fifteen": 15, "twenty": 20,
+    "thirty": 30, "forty": 40, "forty-five": 45, "fifty": 50, "sixty": 60,
+    "couple": 2, "few": 5,
+    # Ordinals, for "the 2nd minute" / "the second minute".
+    "first": 1, "second": 2, "third": 3, "fourth": 4, "fifth": 5,
+}
+
+
+def _num(s):
+    s = (s or "").lower().strip()
+    if s.isdigit():
+        return int(s)
+    ordinal = re.fullmatch(r"(\d+)(?:st|nd|rd|th)", s)
+    if ordinal:
+        return int(ordinal.group(1))
+    return _NUM_WORDS.get(s)
+
+
+_AMT = r"[\w-]+"   # a digit run or a number word; validated by _num afterwards
+
 # Ordered most specific first: "turn it down" must not be read as "play it".
 _MUSIC_INTENTS = [
     # Seeking must outrank "skip"/"back", or "skip forward 10 seconds" is read
-    # as next-track and "go back 30 seconds" as previous-track.
+    # as next-track and "go back 30 seconds" as previous-track. Absolute
+    # positions ("skip to the 2nd minute", "go to 1:30") come first of all.
+    ("seek_to",  r"\b(?:skip|jump|go|seek|take\s+it)\s+to\s+(?:the\s+)?"
+                 r"(?:(?P<mmss>\d+:\d{2})"
+                 r"|minute\s+(?P<mm>" + _AMT + r")"
+                 r"|(?P<m2>" + _AMT + r")(?:st|nd|rd|th)?\s+minute"
+                 r"|(?P<sabs>\d+)\s*(?:seconds?|secs?))\b"),
     ("forward",  r"(?:\b(?:skip|jump|go|seek)\s+)?\b(?:fast[ -]?forward|forward|ahead)"
-                 r"\s+(?:by\s+)?(?P<fs>\d+)\s*(?:seconds?|secs?)\b"),
+                 r"\s+(?:by\s+)?(?P<fs>" + _AMT + r")\s*(?:seconds?|secs?)\b"),
     ("back",     r"\b(?:rewind|(?:go|jump|skip|take\s+it)\s+back|back)"
-                 r"\s+(?:by\s+)?(?P<bs>\d+)\s*(?:seconds?|secs?)\b"),
+                 r"\s+(?:by\s+)?(?P<bs>" + _AMT + r")\s*(?:seconds?|secs?)\b"),
     ("next",     r"\b(?:skip|next)\b(?:\s+(?:this|the|a|one|it))?\s*"
                  r"(?:song|track|tune|joint)?\b"
                  r"|\b(?:change|switch)\s+(?:the\s+|this\s+|that\s+)?"
@@ -260,9 +290,23 @@ def music_intent(text: str):
         m = rx.search(t)
         if not m:
             continue
+        if verb == "seek_to":
+            if m.group("mmss"):
+                mins, secs = m.group("mmss").split(":")
+                n = int(mins) * 60 + int(secs)
+            elif m.group("sabs"):
+                n = int(m.group("sabs"))
+            else:
+                v = _num(m.group("mm") or m.group("m2"))
+                if v is None:
+                    continue     # "skip to the good minute" is not a position
+                n = v * 60
+            return {"do": "seek_to", "query": str(n)}
         if verb in ("forward", "back"):
-            n = m.group("fs" if verb == "forward" else "bs")
-            return {"do": verb, "query": n}
+            v = _num(m.group("fs" if verb == "forward" else "bs"))
+            if v is None:
+                continue
+            return {"do": verb, "query": str(v)}
         if verb == "play":
             q = (m.groupdict().get("q") or "").strip(" .!?,")
             # Spoken orders arrive wrapped in filler — "play me something on

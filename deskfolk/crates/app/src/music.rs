@@ -33,6 +33,8 @@ pub enum Wish {
     Forward(u32),
     /// Jump back this many seconds. Web API only.
     Back(u32),
+    /// Jump to an absolute position, in seconds from the start. Web API only.
+    SeekTo(u32),
 }
 
 impl Wish {
@@ -54,6 +56,7 @@ impl Wish {
                 _ => Wish::Previous,
             },
             "forward" | "ahead" => Wish::Forward(q.parse::<u32>().ok().filter(|n| *n > 0)?.min(600)),
+            "seek_to" | "goto" => Wish::SeekTo(q.parse::<u32>().ok()?.min(3600)),
             "louder" | "volume_up" | "up" => Wish::Louder,
             "quieter" | "volume_down" | "down" => Wish::Quieter,
             "mute" | "unmute" => Wish::Mute,
@@ -75,6 +78,7 @@ impl Wish {
             Wish::Play(q) => format!("put on {q:?}"),
             Wish::Forward(n) => format!("jumped ahead {n}s"),
             Wish::Back(n) => format!("jumped back {n}s"),
+            Wish::SeekTo(n) => format!("jumped to {}:{:02}", n / 60, n % 60),
         }
     }
 
@@ -94,7 +98,7 @@ impl Wish {
             Wish::Louder => (VK_VOLUME_UP, 5),
             Wish::Quieter => (VK_VOLUME_DOWN, 5),
             Wish::Mute => (VK_VOLUME_MUTE, 1),
-            Wish::Play(_) | Wish::Forward(_) | Wish::Back(_) => return None,
+            Wish::Play(_) | Wish::Forward(_) | Wish::Back(_) | Wish::SeekTo(_) => return None,
         })
     }
 }
@@ -155,6 +159,14 @@ pub fn grant(wish: &Wish) -> bool {
                         };
                         let what = wish.describe();
                         std::thread::spawn(move || match crate::spotify::seek_by(delta) {
+                            Ok(()) => tracing::info!("music: {what}"),
+                            Err(e) => tracing::warn!("music: could not seek: {e}"),
+                        });
+                        return true;
+                    }
+                    Wish::SeekTo(n) => {
+                        let (n, what) = (*n, wish.describe());
+                        std::thread::spawn(move || match crate::spotify::seek_to(n) {
                             Ok(()) => tracing::info!("music: {what}"),
                             Err(e) => tracing::warn!("music: could not seek: {e}"),
                         });

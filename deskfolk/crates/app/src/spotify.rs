@@ -263,6 +263,20 @@ pub fn resume() -> Result<(), String> {
 
 /// Jump `delta_secs` (negative = back) within the current track.
 pub fn seek_by(delta_secs: i64) -> Result<(), String> {
+    seek(SeekWhere::Relative(delta_secs))
+}
+
+/// Jump to `secs` from the start of the current track.
+pub fn seek_to(secs: u32) -> Result<(), String> {
+    seek(SeekWhere::Absolute(secs as i64))
+}
+
+enum SeekWhere {
+    Relative(i64),
+    Absolute(i64),
+}
+
+fn seek(target: SeekWhere) -> Result<(), String> {
     let token = access_token()?;
     let client = http()?;
     let resp = client
@@ -277,7 +291,11 @@ pub fn seek_by(delta_secs: i64) -> Result<(), String> {
     let progress = state["progress_ms"].as_i64().ok_or("nothing is playing")?;
     let duration = state["item"]["duration_ms"].as_i64().unwrap_or(i64::MAX);
     // Clamp shy of the very end, or a big jump forward just skips the track.
-    let pos = (progress + delta_secs * 1000).clamp(0, duration.saturating_sub(1_500));
+    let wanted = match target {
+        SeekWhere::Relative(d) => progress + d * 1000,
+        SeekWhere::Absolute(s) => s * 1000,
+    };
+    let pos = wanted.clamp(0, duration.saturating_sub(1_500));
     let resp = client
         .put(format!("https://api.spotify.com/v1/me/player/seek?position_ms={pos}"))
         .bearer_auth(&token)
