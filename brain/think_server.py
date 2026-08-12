@@ -210,15 +210,20 @@ _MUSIC_INTENTS = [
     # Seeking must outrank "skip"/"back", or "skip forward 10 seconds" is read
     # as next-track and "go back 30 seconds" as previous-track. Absolute
     # positions ("skip to the 2nd minute", "go to 1:30") come first of all.
-    ("seek_to",  r"\b(?:skip|jump|go|seek|take\s+it)\s+to\s+(?:the\s+)?"
+    # "got"/"skipped" are what STT tends to make of "go to"/"skip to". The
+    # minute+seconds combo tolerates a missing "to" ("skipped one minute 30
+    # seconds"), because with both units present it can only be a position.
+    ("seek_to",  r"\b(?:go|got|get|skip(?:ped)?|jump|seek|take\s+it)\s+(?:to\s+)?(?:the\s+)?"
                  r"(?:(?P<mmss>\d+:\d{2})"
+                 r"|(?P<min2>" + _AMT + r")\s*minutes?\s*(?:and\s+)?"
+                 r"(?P<sec2>" + _AMT + r")\s*(?:seconds?|secs?)"
                  r"|minute\s+(?P<mm>" + _AMT + r")"
                  r"|(?P<m2>" + _AMT + r")(?:st|nd|rd|th)?\s+minute"
                  r"|(?P<sabs>\d+)\s*(?:seconds?|secs?))\b"),
     ("forward",  r"(?:\b(?:skip|jump|go|seek)\s+)?\b(?:fast[ -]?forward|forward|ahead)"
-                 r"\s+(?:by\s+)?(?P<fs>" + _AMT + r")\s*(?:seconds?|secs?)\b"),
+                 r"\s+(?:by\s+)?(?P<fs>" + _AMT + r")\s*(?P<fu>minutes?|mins?|seconds?|secs?)\b"),
     ("back",     r"\b(?:rewind|(?:go|jump|skip|take\s+it)\s+back|back)"
-                 r"\s+(?:by\s+)?(?P<bs>" + _AMT + r")\s*(?:seconds?|secs?)\b"),
+                 r"\s+(?:by\s+)?(?P<bs>" + _AMT + r")\s*(?P<bu>minutes?|mins?|seconds?|secs?)\b"),
     ("next",     r"\b(?:skip|next)\b(?:\s+(?:this|the|a|one|it))?\s*"
                  r"(?:song|track|tune|joint)?\b"
                  r"|\b(?:change|switch)\s+(?:the\s+|this\s+|that\s+)?"
@@ -294,6 +299,11 @@ def music_intent(text: str):
             if m.group("mmss"):
                 mins, secs = m.group("mmss").split(":")
                 n = int(mins) * 60 + int(secs)
+            elif m.group("min2"):
+                a, b = _num(m.group("min2")), _num(m.group("sec2"))
+                if a is None or b is None:
+                    continue
+                n = a * 60 + b
             elif m.group("sabs"):
                 n = int(m.group("sabs"))
             else:
@@ -306,6 +316,8 @@ def music_intent(text: str):
             v = _num(m.group("fs" if verb == "forward" else "bs"))
             if v is None:
                 continue
+            if (m.group("fu" if verb == "forward" else "bu") or "").startswith("min"):
+                v *= 60
             return {"do": verb, "query": str(v)}
         if verb == "play":
             q = (m.groupdict().get("q") or "").strip(" .!?,")
