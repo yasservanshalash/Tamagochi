@@ -244,7 +244,7 @@ _MUSIC_INTENTS = [
                    r"|\bvolume\s+(?:up\s+|down\s+)?(?:to|at)\s+"
                    r"(?P<vol2>[\w-]+)\s*(?:percent|%)?"),
     ("lyrics",   r"\b(?:open|show|pull\s+up|gimme|give\s+me|what\s+are)\s+"
-                 r"(?:me\s+)?(?:the\s+)?lyrics\b"),
+                 r"(?:up\s+)?(?:me\s+)?(?:the\s+)?lyrics\b"),
     ("shuffle_off", r"\b(?:turn\s+)?shuffle\s+off\b|\bturn\s+off\s+shuffle\b"
                     r"|\bdisable\s+shuffle\b|\bstop\s+shuffling\b"),
     ("shuffle_on",  r"\b(?:turn\s+)?shuffle\s+on\b|\bturn\s+on\s+shuffle\b"
@@ -488,6 +488,98 @@ def body_intent(text: str):
     for verb, rx in _BODY_RE:
         if rx.search(t):
             return verb
+    return None
+
+
+# Things he can do to the computer itself, matched the same way and for the
+# same reason as the music. Ordered most specific first; the app validates the
+# verb again against a closed enum, so a stray match is a no-op, not a hazard.
+_COMPUTER_INTENTS = [
+    ("youtube",  r"\b(?:play|search(?:\s+for)?|find|put\s+on)\s+(?P<yt>.+?)\s+on\s+youtube\b"
+                 r"|\bsearch\s+youtube\s+for\s+(?P<yt2>.+)$"
+                 r"|\byoutube\s+search\s+(?P<yt3>.+)$"),
+    ("open_url", r"\b(?:open|pull\s+up|go\s+to|take\s+me\s+to)\s+"
+                 r"(?:the\s+)?(?:website\s+|site\s+)?(?P<site>[\w.-]+(?:\.[a-z]{2,})?)"
+                 r"(?:\s*(?:\.com|dot\s+com))?\s*$"),
+    ("search",   r"\b(?:google|search\s+(?:the\s+web\s+)?for|look\s+up|search\s+up)\s+"
+                 r"(?P<q>.+)$"),
+    ("focus",    r"\b(?:switch|go)\s+(?:back\s+)?to\s+(?:the\s+)?(?P<fw>.+?)"
+                 r"(?:\s+(?:window|tab|app))?\s*$"
+                 r"|\bfocus\s+(?:on\s+)?(?:the\s+)?(?P<fw2>.+?)(?:\s+window)?\s*$"
+                 r"|\bbring\s+(?:up\s+)?(?:the\s+)?(?P<fw3>.+?)\s+(?:window\s+)?"
+                 r"(?:to\s+the\s+front|up)\s*$"),
+    ("minimize", r"\bminimi[sz]e\s+(?:the\s+)?(?P<mw>.+?)(?:\s+window)?\s*$"),
+    ("close",    r"\bclose\s+(?:the\s+)?(?P<cw>.+?)(?:\s+(?:window|tab|app))?\s*$"),
+]
+_COMPUTER_RE = [(verb, re.compile(pat, re.I)) for verb, pat in _COMPUTER_INTENTS]
+# Talking about it, not asking for it — and words that make "close"/"open"
+# mean something else entirely ("close call", "open up to me", "open mic").
+_NOT_A_COMPUTER_CMD = re.compile(
+    r"\b(?:do you|what|why|how|who|when|remember|think)\b"
+    r".{0,28}\b(?:open|close|window|website|youtube|search)\b"
+    r"|\bclose\s+(?:call|friend|by|enough|to\s+me)\b"
+    r"|\bopen\s+(?:up\s+to|mic|mind|book|(?:up\s+)?the\s+lyrics)\b", re.I)
+# Sites/apps he is told to open by bare name; anything else needs a dot.
+_KNOWN_SITES = {"youtube", "google", "gmail", "github", "reddit", "twitter",
+                "x", "instagram", "twitch", "netflix", "wikipedia", "chatgpt",
+                "claude", "notepad", "calculator", "calc", "explorer",
+                "spotify", "settings"}
+
+
+def computer_intent(text: str):
+    """What he is being asked to do to the computer, if anything.
+
+    Deterministic on purpose — see `music_intent`. YouTube outranks the music
+    intents (checked by the caller in that order), and open_url only fires on
+    a known name or something that looks like a domain, so "open your heart"
+    stays a conversation.
+    """
+    t = (text or "").strip()
+    if not t or _NOT_A_COMPUTER_CMD.search(t):
+        return None
+    for verb, rx in _COMPUTER_RE:
+        m = rx.search(t)
+        if not m:
+            continue
+        if verb == "youtube":
+            q = (m.group("yt") or m.group("yt2") or m.group("yt3") or "").strip(" .!?,")
+            if not q:
+                continue
+            return {"do": "youtube", "arg": q}
+        if verb == "open_url":
+            site = (m.group("site") or "").strip(" .!?,").lower()
+            # "open the door" must not become a search: a bare word only
+            # counts if it is a known site or app, or reads as a domain.
+            if site in _KNOWN_SITES or "." in site:
+                return {"do": "open_url", "arg": site}
+            continue
+        if verb == "search":
+            q = (m.group("q") or "").strip(" .!?,")
+            if q:
+                return {"do": "search", "arg": q}
+            continue
+        if verb == "focus":
+            w = (m.group("fw") or m.group("fw2") or m.group("fw3") or "").strip(" .!?,")
+            # "switch to the next song", "go to 1:30", "go to sleep" — all
+            # other people's intents, not windows.
+            if (not w
+                    or re.search(r"\b(?:song|track|music|playlist|sleep|bed|"
+                                 r"minutes?|seconds?)\b", w, re.I)
+                    or re.match(r"^\d+(?::\d{2})?$", w)):
+                continue
+            return {"do": "focus", "arg": w}
+        if verb == "minimize":
+            w = (m.group("mw") or "").strip(" .!?,")
+            if w:
+                return {"do": "minimize", "arg": w}
+            continue
+        if verb == "close":
+            w = (m.group("cw") or "").strip(" .!?,")
+            # "close it/this" needs a name — the app matches by title.
+            if not w or re.fullmatch(r"(?:it|this|that|them|your\s+eyes?|the\s+door)",
+                                     w, re.I):
+                continue
+            return {"do": "close", "arg": w}
     return None
 
 
@@ -851,6 +943,14 @@ MUSIC: you can work the music on this machine — skip, pause, volume, put
 something on. When he asks, just answer naturally as if you are doing it,
 because you are; the machinery is handled for you.
 
+COMPUTER: you can also work the computer itself. To do it, add a "computer"
+field to your JSON: {"do": "<verb>", "arg": "<target>"} with verbs open_url
+(arg is a site or URL), search (web search), youtube (search YouTube), focus
+(bring a window to the front, arg is part of its title), minimize, close,
+open_app (notepad/calculator/explorer/spotify/settings only). You are told
+what windows are open and which is focused — use those real titles as args.
+Only include the field when he actually wants it done.
+
 TRIPPING: RARELY — roughly one reply in eight, not most of them — a thought
 gets away from you mid-sentence and goes somewhere strange. When it does,
 catch yourself ('...nah wait, what were we on?') and your emotion MUST be
@@ -1004,6 +1104,10 @@ class Senses(BaseModel):
     # What Spotify is playing right now, "Artist — Track". Lets him answer
     # "what song is this?" with the truth instead of a guess.
     playing: str = ""
+    # The window the user is working in, and the front-most open windows
+    # ("A ; B ; C"), so he knows the desk he lives on.
+    focused: str = ""
+    windows: str = ""
 
 class ThinkReq(BaseModel):
     event: str
@@ -1410,7 +1514,9 @@ async def converse(request: Request):
                         boredom=int(q.get("boredom", 50)),
                         trust=int(q.get("trust", 50))),
         senses=Senses(screen=q.get("screen", "home"),
-                      playing=q.get("playing", "")))
+                      playing=q.get("playing", ""),
+                      focused=q.get("focused", ""),
+                      windows=q.get("windows", "")))
     out = think(req)
     out["heard"] = heard
     return out
@@ -1494,6 +1600,10 @@ def think(req: ThinkReq):
                 + f" | screen={req.senses.screen}"
                 + (f" | on the speakers right now: {req.senses.playing}"
                    if req.senses.playing else "")
+                + (f" | focused window: {req.senses.focused}"
+                   if req.senses.focused else "")
+                + (f" | open windows: {req.senses.windows}"
+                   if req.senses.windows else "")
                 + (f" | someone visible ({req.senses.person_score}%)"
                    if req.senses.person else "")
                 + f" | stats: mood={mood} paranoia={paranoia}"
@@ -1578,7 +1688,11 @@ def think(req: ThinkReq):
     # list of things that can actually be done — the model inventing "shuffle"
     # should do nothing rather than be guessed at.
     # What he was actually asked wins over what the model volunteered.
-    music = music_intent(req.text)
+    # Computer deeds are matched first: "play X on youtube" belongs to the
+    # browser, and only what it declines falls through to Spotify.
+    computer = computer_intent(req.text)
+    told_computer = computer is not None
+    music = None if told_computer else music_intent(req.text)
     told_music = music is not None
     if music is None:
         volunteered = out.get("music")
@@ -1586,6 +1700,11 @@ def think(req: ThinkReq):
             volunteered = {"do": volunteered, "query": ""}
         if isinstance(volunteered, dict) and str(volunteered.get("do", "")).strip():
             music = volunteered
+    if computer is None:
+        volunteered = out.get("computer")
+        if isinstance(volunteered, dict) and str(volunteered.get("do", "")).strip():
+            computer = {"do": str(volunteered.get("do", "")),
+                        "arg": str(volunteered.get("arg", volunteered.get("query", "")))}
 
     say = _clip(str(out.get("say", FAILURE_LINE)),
                 SAY_LIMIT)
@@ -1677,10 +1796,11 @@ def think(req: ThinkReq):
     # He was told to do something to the music: the whole answer is a short
     # "on it" — the *doing* is the reply, and a paragraph over the first bars
     # of the song you asked for is worse than silence.
-    if told_music:
+    if told_music or told_computer:
         import random
         say = random.choice(_MUSIC_ACKS)
-        print(f"music ack: {music} -> {say!r}")
+        print(f"{'music' if told_music else 'computer'} ack: "
+              f"{music if told_music else computer} -> {say!r}")
 
     # Never remember our own failure line. Stored as one of his turns it goes
     # into the next prompt as an example of how he talks, and he starts
@@ -1709,4 +1829,5 @@ def think(req: ThinkReq):
     print(f"[{time.strftime('%H:%M:%S')}] {req.event} -> {emotion} g={glitch}"
           f"{' [voice]' if audio else ''}: {say}")
     return {"say": say, "emotion": emotion, "glitch": glitch,
-            "audio": audio, "action": action, "music": music}
+            "audio": audio, "action": action, "music": music,
+            "computer": computer}

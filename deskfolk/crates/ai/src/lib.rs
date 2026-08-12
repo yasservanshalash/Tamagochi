@@ -83,6 +83,10 @@ pub struct ThinkReply {
     /// still be listening to you — where `action` is what his body does next.
     #[serde(default)]
     pub music: Option<MusicWish>,
+    /// Something to do to the computer itself — open a site, focus a window.
+    /// The same alongside-speech channel as `music`, for the same reason.
+    #[serde(default)]
+    pub computer: Option<ComputerWish>,
 }
 
 /// A request to the music, as the mind words it. Validated by the app, which
@@ -95,6 +99,18 @@ pub struct MusicWish {
     /// What to put on, when the verb is `play`.
     #[serde(default, alias = "track", alias = "q")]
     pub query: String,
+}
+
+/// A request to the computer, as the mind words it. Validated by the app,
+/// which owns the closed set of deeds that can actually be done.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+pub struct ComputerWish {
+    /// `open_url`, `search`, `focus`, `minimize`, `close`, `open_app`, …
+    #[serde(default, alias = "action", alias = "cmd")]
+    pub r#do: String,
+    /// The site, query, window name or app the verb applies to.
+    #[serde(default, alias = "query", alias = "target")]
+    pub arg: String,
 }
 
 impl ThinkReply {

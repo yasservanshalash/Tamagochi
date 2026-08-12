@@ -11,6 +11,7 @@ use deskfolk_ai::{Provider, ProviderConfig, Role, ThinkRequest, ThinkReply, Turn
 use deskfolk_engine::Reply;
 use parking_lot::Mutex;
 
+use crate::computer;
 use crate::journal;
 use crate::music;
 use crate::runtime::Runtime;
@@ -109,6 +110,26 @@ pub fn obey_music(wish: Option<&deskfolk_ai::MusicWish>) -> Option<&'static str>
     }
 }
 
+/// Do whatever the reply asked of the computer, if anything. Same contract as
+/// [`obey_music`]: a line to speak when it could not be done, because a
+/// "gotchu" followed by nothing happening reads as him lying.
+pub fn obey_computer(wish: Option<&deskfolk_ai::ComputerWish>) -> Option<&'static str> {
+    let w = wish?;
+    let Some(deed) = computer::Deed::parse(&w.r#do, &w.arg) else {
+        if !w.r#do.trim().is_empty() {
+            tracing::debug!("computer: ignoring invented verb {:?}", w.r#do);
+        }
+        return None;
+    };
+    if computer::grant(&deed) {
+        journal::did(deed.describe());
+        None
+    } else {
+        journal::trouble(format!("{} — could not", deed.describe()));
+        Some("hm, I don't see that window anywhere, my guy.")
+    }
+}
+
 /// Record a spoken exchange, so what he was told out loud is part of the same
 /// thread as everything he was told in text.
 pub fn remember_exchange(mind: &Mind, user: &str, companion: &str) {
@@ -125,6 +146,19 @@ pub fn build_request(rt: &Runtime, mind: &Mind, event: &str, text: &str) -> Thin
     let mut senses = std::collections::BTreeMap::new();
     senses.insert("hour".to_string(), rt.inputs.local_hour.to_string());
     senses.insert("screen".to_string(), "desktop-pc".to_string());
+    // What is on the desk he lives on, so his idle thoughts and text answers
+    // can be about the actual room rather than a guessed one.
+    if let Some(f) = deskfolk_render_win::ledges::focused_window() {
+        senses.insert("focused".to_string(), f.chars().take(80).collect());
+    }
+    let windows = deskfolk_render_win::ledges::open_windows(6)
+        .iter()
+        .map(|t| t.chars().take(48).collect::<String>())
+        .collect::<Vec<_>>()
+        .join(" ; ");
+    if !windows.is_empty() {
+        senses.insert("windows".to_string(), windows.chars().take(300).collect());
+    }
 
     ThinkRequest {
         system: pkg.manifest.personality.prompt.clone(),
@@ -183,6 +217,9 @@ pub fn ask(
                     false
                 };
                 if let Some(excuse) = obey_music(reply.music.as_ref()) {
+                    voice.speak(excuse);
+                }
+                if let Some(excuse) = obey_computer(reply.computer.as_ref()) {
                     voice.speak(excuse);
                 }
                 journal::said(journal::Said {

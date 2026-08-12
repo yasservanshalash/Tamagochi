@@ -26,6 +26,7 @@ use tauri::{
 
 mod audio;
 mod commands;
+mod computer;
 mod config;
 mod ear;
 mod agent;
@@ -584,6 +585,9 @@ pub(crate) fn boot_companion(app: &AppHandle) -> anyhow::Result<()> {
             mind::remember_exchange(&mind, &h.heard, &h.say);
             let has_audio = voice.speak(&h.say);
             if let Some(excuse) = mind::obey_music(h.music.as_ref()) {
+                voice.speak(excuse);
+            }
+            if let Some(excuse) = mind::obey_computer(h.computer.as_ref()) {
                 voice.speak(excuse);
             }
             // A movement he was told to make (or chose): route it to the wander

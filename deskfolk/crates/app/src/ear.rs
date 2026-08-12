@@ -80,6 +80,9 @@ pub struct Heard {
     /// would be understood and then ignored.
     #[serde(default)]
     pub music: Option<deskfolk_ai::MusicWish>,
+    /// Anything he wants done to the computer, for the same reason.
+    #[serde(default)]
+    pub computer: Option<deskfolk_ai::ComputerWish>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -434,8 +437,26 @@ fn converse(
     let playing = crate::music::now_playing()
         .map(|np| format!("&playing={}", urlenc(&format!("{} — {}", np.artist, np.track))))
         .unwrap_or_default();
+    // ...and what is on the screen, so "what am I looking at" and "close that"
+    // are answered from the desk he actually lives on. Capped hard: the prompt
+    // is length-sensitive and window titles ramble.
+    let focused = deskfolk_render_win::ledges::focused_window()
+        .map(|t| format!("&focused={}", urlenc(&clip(&t, 80))))
+        .unwrap_or_default();
+    let windows = {
+        let list = deskfolk_render_win::ledges::open_windows(6)
+            .iter()
+            .map(|t| clip(t, 48))
+            .collect::<Vec<_>>()
+            .join(" ; ");
+        if list.is_empty() {
+            String::new()
+        } else {
+            format!("&windows={}", urlenc(&clip(&list, 300)))
+        }
+    };
     let url = format!(
-        "{}/pet/converse?screen=desktop-pc&hour={hour}&battery=100&charging=1{playing}",
+        "{}/pet/converse?screen=desktop-pc&hour={hour}&battery=100&charging=1{playing}{focused}{windows}",
         base.trim_end_matches('/')
     );
     tracing::info!("mic: sending {:.1}s of speech", secs(pcm.len()));
@@ -662,6 +683,15 @@ fn speech_bar(floor: u8) -> u8 {
     // a fixed margin — and never below the fixed margin in a quiet one.
     let margin = OVER_FLOOR.max(floor / 4);
     floor.saturating_add(margin).max(MIN_THRESHOLD)
+}
+
+/// Cut on a char boundary, because window titles contain the whole of Unicode.
+fn clip(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        s.to_string()
+    } else {
+        s.chars().take(max).collect()
+    }
 }
 
 fn urlenc(s: &str) -> String {

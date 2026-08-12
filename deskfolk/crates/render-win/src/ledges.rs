@@ -202,10 +202,45 @@ mod win {
         // the window you are actually using is the interesting one to sit on.
         ledges_from(scan.found, work, headroom)
     }
+
+    /// The titles of every real window, nearest the front first — what a
+    /// person would list if asked "what's open right now?". Same filters as
+    /// the ledges, because those filters already encode "counts as being on
+    /// the screen".
+    pub fn open_windows(limit: usize) -> Vec<String> {
+        let mut scan = Scan { skip: 0 as HWND, found: Vec::new() };
+        unsafe {
+            EnumWindows(Some(each), (&mut scan as *mut Scan) as LPARAM);
+        }
+        scan.found.into_iter().map(|(_, t)| t).take(limit).collect()
+    }
+
+    /// The title of the window the user is working in right now.
+    pub fn focused_window() -> Option<String> {
+        use windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
+        unsafe {
+            let hwnd = GetForegroundWindow();
+            if hwnd as isize == 0 {
+                return None;
+            }
+            let t = title_of(hwnd);
+            (!t.is_empty()).then_some(t)
+        }
+    }
 }
 
 #[cfg(windows)]
-pub use win::scan;
+pub use win::{focused_window, open_windows, scan};
+
+#[cfg(not(windows))]
+pub fn open_windows(_limit: usize) -> Vec<String> {
+    Vec::new()
+}
+
+#[cfg(not(windows))]
+pub fn focused_window() -> Option<String> {
+    None
+}
 
 #[cfg(test)]
 mod tests {
