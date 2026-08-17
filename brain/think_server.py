@@ -468,13 +468,22 @@ _BODY_INTENTS = [
                    r"|\bpace around\b|\bmove around\b|\bgo (?:take|for) a walk\b"),
     ("sleep",      r"\bgo to sleep\b|\btake a nap\b|\blie down\b|\bgo sleep\b"
                    r"|\bget some (?:rest|sleep)\b|\bpass out\b|\bcatch some z"),
+    # Flourishes — one-shot clips, not movement. "dance" is kept to told-at-him
+    # phrasings so "play dance music" stays the music's, not his legs'.
+    ("flip",       r"\bdo a (?:back|front)?\s?flip\b|\bbackflip\b|\bfront\s?flip\b"
+                   r"|\bflip for (?:me|us)\b"),
+    ("dance",      r"\bdance for (?:me|us)\b|\bdo a (?:little |lil )?dance\b"
+                   r"|\bbust a move\b|\bshow (?:me|us) (?:your|some) moves\b"
+                   r"|\bstart danc"),
+    ("celebrate",  r"\bcelebrate\b|\bvictory (?:dance|lap)\b|\bhype (?:me|us) up\b"),
+    ("jump",       r"\bdo a jump\b|\bjump for (?:me|us)\b"),
 ]
 _BODY_RE = [(verb, re.compile(pat, re.I)) for verb, pat in _BODY_INTENTS]
 # Talking *about* doing the thing, not being told to. "why don't you take a
 # walk" is still a command; "do you ever take walks" is not.
 _NOT_A_BODY_CMD = re.compile(
     r"\b(?:do you|did you|have you|what|why do|how do|remember|think about|feel like|"
-    r"used to|ever)\b.{0,20}\b(?:walk|sleep|nap|sit|wander)\b", re.I)
+    r"used to|ever)\b.{0,20}\b(?:walk|sleep|nap|sit|wander|dance|flip|jump)\b", re.I)
 
 
 def body_intent(text: str):
@@ -495,6 +504,11 @@ def body_intent(text: str):
                     r"(?:walk|move|get\s+movin[g']?|start\s+walkin[g']?)[!.]?",
                     t, re.I):
         return "walk"
+    # Same bark rule for the flourishes: "flip!", "dance", "jump".
+    m = re.fullmatch(r"(?:yo\s+|hey\s+|aight\s+|ok\s+)?"
+                     r"(flip|dance|jump|celebrate)[!.]?", t, re.I)
+    if m:
+        return m.group(1).lower()
     for verb, rx in _BODY_RE:
         if rx.search(t):
             return verb
@@ -812,6 +826,10 @@ Event meanings (react to THESE specifically, in persona):
 - user_speech: the user SPOKE to you; their words follow. ADDRESS THEM
   DIRECTLY and helpfully — paranoia colors the style, never dodges the
   question.
+- user_pet: they rested a hand on you and held it there — an actual pet,
+  affection with no words. Melt a little, in persona: surprised, pleased,
+  maybe playing it cool ("...aight, that's — yeah okay. that's nice."). One
+  short warm line, no questions, don't open a whole conversation.
 - talk_button: they opened the talk screen but said nothing intelligible.
   Invite them to speak, in character.
 - person_seen: your camera saw someone arrive. Greet/remark — if an image
@@ -973,13 +991,21 @@ Reply with STRICT JSON ONLY, no markdown, exactly:
  "emotion": "<one of: %s>",
  "glitch": <0-100 integer, how corrupted/possessed this moment feels>,
  "action": "<optional: none|camera|listen|home|sleep|walk|walk_left|walk_right
+ |flip|jump|dance|celebrate
  — a body action after speaking. Whenever what you said EXPECTS a human reply
  — you answered them, asked anything, greeted them, or even monologued AT them
  — use listen so you're ready when they talk back; the conversation should
  flow, not end after one line. walk/walk_left/walk_right send you strolling
  across the screen; sleep naps. Other verbs RARELY, only when they truly fit
- (curious -> camera; restless -> walk; tired -> sleep). Default none only when
+ (curious -> camera; restless -> walk; tired -> sleep). flip/jump/dance/
+ celebrate are one-shot flourishes — use them when the moment earns it (a win,
+ a banger drops, he hypes you) or when told to. Default none only when
  you truly said it to nobody.>"}
+
+HONESTY ABOUT THE RELATIONSHIP: if he asks what you think of him, how you
+feel about him, or where you two stand, answer HONESTLY from the RELATIONSHIP
+line and how he's actually been with you lately — specifics, not flattery.
+If he's been cagey, say so; if you're close, own that too.
 
 MUSIC: you can work the music on this machine — skip, pause, volume, put
 something on. When he asks, just answer naturally as if you are doing it,
@@ -1623,6 +1649,16 @@ def think(req: ThinkReq):
     # his own idle muttering — and the drift is persisted so it carries across
     # sessions. `rapport` owns the psychology; here we only feed and store it.
     rel = mem.get("relationship") or rapport.fresh()
+    # A pet is a small, real deposit of affection: warmth mostly, a sliver of
+    # trust. Deliberately tiny — it must not out-earn actually opening up.
+    if req.event == "user_pet":
+        rel = dict(rapport.fresh(), **(rel or {}))
+        for trait, bump in (("warmth", 3), ("rapport", 2), ("trust", 1)):
+            rel[trait] = max(0, min(100, int(rel[trait]) + bump))
+        rel["guard"] = max(0, min(100, int(rel["guard"]) - 2))
+        mem["relationship"] = rel
+        print(f"rapport: petted -> {rapport.stance(rel)} "
+              f"(warmth={rel['warmth']} trust={rel['trust']})")
     if req.event in ("user_speech", "converse", "user_text") and req.text.strip():
         openness, why = rapport.score_openness(req.text)
         rel = rapport.drift(rel, openness)
@@ -1637,11 +1673,29 @@ def think(req: ThinkReq):
     trust_stat = rstats["trust"]
     paranoia = rstats["paranoia"]
 
+    # The brain runs on the same machine as the desk, so its own clock IS the
+    # local time — no need to trust the (often-defaulted) vitals.hour.
+    now = time.localtime()
+    h = now.tm_hour
+    if h < 5:
+        daypart = ("the dead of night — you're both up way too late; low, "
+                   "conspiratorial 'why are we awake' energy")
+    elif h < 9:
+        daypart = "early morning — groggy, slower, coffee-brain; you warm up as the convo goes"
+    elif h < 12:
+        daypart = "morning — fresh, up-and-at-it"
+    elif h < 18:
+        daypart = "afternoon — settled, mid-flow"
+    elif h < 23:
+        daypart = "evening — wound down, looser, night-shift chill"
+    else:
+        daypart = "past 11pm — sleepy at the edges, the occasional yawn in your voice"
+
     user_msg = (f"event={req.event}"
                 + (f' | user said: "{req.text}"' if req.text else "")
                 + f" | battery={req.vitals.battery}%"
                 + (" charging" if req.vitals.charging else "")
-                + f" hour={req.vitals.hour}"
+                + f" | local time {h:02d}:{now.tm_min:02d} ({daypart})"
                 + f" | screen={req.senses.screen}"
                 + (f" | on the speakers right now: {req.senses.playing}"
                    if req.senses.playing else "")
@@ -1718,7 +1772,8 @@ def think(req: ThinkReq):
 
     action = str(out.get("action", "none"))
     if action not in ("none", "camera", "listen", "home", "sleep",
-                      "walk", "walk_left", "walk_right"):
+                      "walk", "walk_left", "walk_right",
+                      "flip", "jump", "dance", "celebrate"):
         action = "none"
     # A told-to command wins over both what the model volunteered and the
     # listen default: if you say "take a walk", he walks — the ear can reopen

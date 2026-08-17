@@ -264,6 +264,12 @@ pub fn ask(
                 guard.inputs.busy = false;
                 guard.inputs.voice_pending = has_audio;
                 apply(&mut guard, &reply, has_audio);
+                // A flourish (flip, dance, celebrate) is a one-shot on top of
+                // the pose the reply just set, so it plays after apply.
+                if let Some(clip) = crate::agent::route_shot(&reply.action) {
+                    let _ = guard.engine.play_emotion(clip, 0, 0);
+                    journal::did(format!("did a {clip}"));
+                }
             }
             Err(e) => {
                 tracing::warn!("mind unreachable: {e}");

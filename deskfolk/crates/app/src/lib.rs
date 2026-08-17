@@ -192,6 +192,30 @@ impl deskfolk_render_win::Host for CompanionHost {
         on_menu(&self.app, id);
     }
 
+    fn on_pet(&self) {
+        // A pet never opens the mic — the whole point is that it says
+        // something without words. Asleep, it's a gentle wake.
+        tracing::info!("petted");
+        let asleep = {
+            let mut rt = self.rt.lock();
+            rt.engine.touch();
+            rt.engine.is_asleep()
+        };
+        if asleep {
+            let _ = self.rt.lock().engine.wake_up();
+            return;
+        }
+        let _ = self.rt.lock().engine.play_emotion("laugh", 0, 0);
+        mind::ask(
+            self.rt.clone(),
+            self.mind.clone(),
+            self.voice.clone(),
+            self.nudge.clone(),
+            "user_pet".into(),
+            String::new(),
+        );
+    }
+
     fn on_hotkey(&self) {
         // Same as clicking him, but from wherever you happen to be — so
         // talking to him does not first require finding him on screen.
@@ -617,9 +641,15 @@ pub(crate) fn boot_companion(app: &AppHandle) -> anyhow::Result<()> {
                 say: h.say,
                 emotion,
                 glitch: h.glitch,
-                action: h.action,
+                action: h.action.clone(),
                 has_audio,
             });
+            // "do a flip" and friends: a one-shot on top of whatever pose the
+            // reply set, same as the mind::ask path.
+            if let Some(clip) = agent::route_shot(&h.action) {
+                let _ = guard.engine.play_emotion(clip, 0, 0);
+                journal::did(format!("did a {clip}"));
+            }
         }) as Arc<dyn Fn(ear::Heard) + Send + Sync>
     };
     // Nothing said, or the brain could not be reached: come back to rest

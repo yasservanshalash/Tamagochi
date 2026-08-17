@@ -135,6 +135,11 @@ pub trait Host: Send + Sync + 'static {
     fn on_menu(&self, id: &str);
     /// The global hotkey was pressed, from wherever the user happened to be.
     fn on_hotkey(&self) {}
+    /// A long, still press on him — a pet, not a click. Hosts that don't
+    /// distinguish affection fall back to the click.
+    fn on_pet(&self) {
+        self.on_click()
+    }
     /// He was dragged somewhere new, in screen pixels.
     fn on_moved(&self, _x: i32, _y: i32) {}
 }

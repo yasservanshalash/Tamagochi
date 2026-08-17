@@ -89,6 +89,8 @@ struct Drag {
     cursor: POINT,
     origin: (i32, i32),
     moved: bool,
+    /// When the button went down — a long still press is a pet, not a click.
+    pressed: std::time::Instant,
 }
 
 struct WindowState {
@@ -538,6 +540,7 @@ unsafe extern "system" fn wndproc(
                         state.shared.y.load(Ordering::Relaxed),
                     ),
                     moved: false,
+                    pressed: std::time::Instant::now(),
                 });
                 // Capture keeps the moves coming even when the cursor slips
                 // onto transparent pixels mid-drag, which is what used to drop
@@ -580,6 +583,11 @@ unsafe extern "system" fn wndproc(
                             state.shared.y.load(Ordering::Relaxed),
                         );
                         state.shared.host.on_moved(x, y);
+                    }
+                    // Holding a still hand on him for a beat is petting, not
+                    // clicking — a different gesture with a different meaning.
+                    Some(d) if d.pressed.elapsed() >= std::time::Duration::from_millis(900) => {
+                        state.shared.host.on_pet()
                     }
                     Some(_) => state.shared.host.on_click(),
                     None => {}

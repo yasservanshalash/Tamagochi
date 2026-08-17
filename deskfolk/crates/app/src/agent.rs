@@ -39,6 +39,19 @@ pub fn route_walk(action: &str, nudge: &Arc<Mutex<Option<Facing>>>) -> bool {
     true
 }
 
+/// A one-shot flourish the mind chose — flip, dance, celebrate. Returns the
+/// clip to play, or None for anything that is not a flourish. Kept separate
+/// from `route_walk` because these do not move the window; they interrupt the
+/// pose for a beat and fall back to whatever he was doing.
+pub fn route_shot(action: &str) -> Option<&'static str> {
+    match action {
+        "flip" | "jump" => Some("jump"),
+        "dance" => Some("dance"),
+        "celebrate" => Some("celebrate"),
+        _ => None,
+    }
+}
+
 fn coin() -> Facing {
     let odd = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -87,5 +100,20 @@ mod tests {
             assert!(!route_walk(a, &n), "'{a}' is not the app's to grant");
         }
         assert!(n.lock().is_none(), "nothing should have touched the nudge");
+    }
+
+    #[test]
+    fn flourishes_map_to_their_clips() {
+        assert_eq!(route_shot("flip"), Some("jump"));
+        assert_eq!(route_shot("jump"), Some("jump"));
+        assert_eq!(route_shot("dance"), Some("dance"));
+        assert_eq!(route_shot("celebrate"), Some("celebrate"));
+    }
+
+    #[test]
+    fn non_flourishes_are_not_shots() {
+        for a in ["walk", "listen", "sleep", "none", "", "moonwalk"] {
+            assert_eq!(route_shot(a), None, "'{a}' is not a flourish");
+        }
     }
 }
