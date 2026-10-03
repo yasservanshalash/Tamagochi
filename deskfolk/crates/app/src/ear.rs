@@ -279,6 +279,11 @@ fn run(
     // the mic — in Windows or in his menu — used to need a full restart before
     // he heard the new one. Re-resolve now and then and reopen if it moved.
     let mut device_checked = Instant::now();
+    // Consecutive watch windows of exact digital silence. A muted headset or
+    // sleeping webcam streams zeros without erroring, and he would otherwise
+    // sit deaf on it forever; after a few dead windows he hunts for a mic
+    // that is actually carrying sound and moves himself onto it.
+    let mut dead_windows: u32 = 0;
 
     loop {
         match rx.recv_timeout(Duration::from_millis(40)) {
@@ -314,6 +319,7 @@ fn run(
                 if watching && !state.listening.load(Ordering::Relaxed) {
                     watch_tick(
                         &client, &base, &settings, &state, &ears, &mut watch_rec,
+                        &mut dead_windows,
                     );
                 }
             }
@@ -371,6 +377,7 @@ fn watch_tick(
     state: &Arc<EarState>,
     ears: &Ears,
     rec: &mut Option<Recorder>,
+    dead_windows: &mut u32,
 ) {
     if rec.is_none() {
         *rec = Recorder::open(&settings.lock());
@@ -380,9 +387,39 @@ fn watch_tick(
             return;
         }
     }
-    let Some(recorder) = rec.as_ref() else { return };
+    let (turn, heard, held_name) = {
+        let Some(recorder) = rec.as_ref() else { return };
+        let turn = record_turn(recorder, state, WATCHING, Some(ears));
+        (turn, recorder.take_heard(), recorder.device_name().to_string())
+    };
 
-    let Some((pcm, _, barged)) = record_turn(recorder, state, WATCHING, Some(ears)) else {
+    if heard {
+        *dead_windows = 0;
+    } else {
+        *dead_windows += 1;
+        // ~5 windows of 6s each: half a minute of exact zeros is a dead
+        // device, not a quiet room. Hunt for a mic that actually works.
+        if *dead_windows >= 5 {
+            *dead_windows = 0;
+            match crate::audio::find_live_input(Some(&held_name)) {
+                Some(live) => {
+                    tracing::warn!(
+                        "mic: '{held_name}' has delivered pure silence for \
+                         30s; switching to '{live}', which is carrying sound"
+                    );
+                    settings.lock().input = Some(live);
+                    *rec = None;
+                }
+                None => tracing::warn!(
+                    "mic: '{held_name}' is delivering pure silence and no \
+                     other input carries sound either; staying put"
+                ),
+            }
+            return;
+        }
+    }
+
+    let Some((pcm, _, barged)) = turn else {
         return;
     };
 

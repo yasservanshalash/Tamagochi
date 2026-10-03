@@ -22,6 +22,11 @@ use serde::{Deserialize, Serialize};
 /// The brain streams PCM16 mono at this rate; everything else is derived.
 pub const SOURCE_RATE: u32 = 16_000;
 
+/// Below this peak a capture buffer counts as digitally dead. Even a quiet
+/// room on a real mic carries noise well above it; only a device the OS has
+/// cut off (muted wireless headset, sleeping webcam) sits at exact zero.
+const DEAD_SILENCE: f32 = 0.0005;
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AudioSettings {
     /// Device names, not indices — indices reshuffle when you plug in a
@@ -254,6 +259,11 @@ pub struct Recorder {
     /// The device this stream was actually opened on, so a long-lived recorder
     /// can notice that the effective device has since changed out from under it.
     name: String,
+    /// Whether any real sample has arrived since the last check. A healthy mic
+    /// always carries at least dither; a device Windows has silently cut off
+    /// (muted headset, sleeping webcam) delivers exact zeros forever, and
+    /// that is indistinguishable from a quiet room by level alone.
+    heard: Arc<std::sync::atomic::AtomicBool>,
 }
 
 #[allow(dead_code)]
@@ -268,6 +278,8 @@ impl Recorder {
         let (tx, rx): (Sender<Vec<u8>>, Receiver<Vec<u8>>) = mpsc::channel();
         let level = Arc::new(Mutex::new(0u8));
         let cb_level = level.clone();
+        let heard = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let cb_heard = heard.clone();
 
         let stream = device
             .build_input_stream(
@@ -283,6 +295,9 @@ impl Recorder {
                         peak = peak.max(s.abs());
                     }
                     *cb_level.lock() = (peak * 100.0).min(100.0) as u8;
+                    if peak > DEAD_SILENCE {
+                        cb_heard.store(true, std::sync::atomic::Ordering::Relaxed);
+                    }
 
                     let bytes = to_pcm16(&resample_f32(&mono, device_rate, SOURCE_RATE));
                     let _ = tx.send(bytes);
@@ -295,7 +310,12 @@ impl Recorder {
 
         stream.play().ok()?;
         tracing::info!("audio in: '{name}' at {device_rate}Hz, {channels}ch");
-        Some(Self { _stream: stream, rx, level, name })
+        Some(Self { _stream: stream, rx, level, name, heard })
+    }
+
+    /// True if any real sample arrived since the last call, then resets.
+    pub fn take_heard(&self) -> bool {
+        self.heard.swap(false, std::sync::atomic::Ordering::Relaxed)
     }
 
     /// The device this recorder is capturing from.
@@ -315,6 +335,49 @@ impl Recorder {
     pub fn level(&self) -> u8 {
         *self.level.lock()
     }
+}
+
+/// Find an input device that is actually carrying sound right now.
+///
+/// Opens each capture device for a moment and returns the first whose stream
+/// rises above [`DEAD_SILENCE`]. `skip` is the device already known dead, so
+/// the search never hands back the one that caused it. Blocking (~300ms per
+/// device) — call it from the ear thread, never the UI.
+pub fn find_live_input(skip: Option<&str>) -> Option<String> {
+    let h = host();
+    for d in h.input_devices().ok()? {
+        let Ok(name) = d.name() else { continue };
+        if Some(name.as_str()) == skip {
+            continue;
+        }
+        let Ok(config) = d.default_input_config() else { continue };
+        let peak = Arc::new(Mutex::new(0.0f32));
+        let cb = peak.clone();
+        let Ok(stream) = d.build_input_stream(
+            &config.config(),
+            move |data: &[f32], _| {
+                let mut p = cb.lock();
+                for s in data {
+                    *p = p.max(s.abs());
+                }
+            },
+            |_| {},
+            None,
+        ) else {
+            continue;
+        };
+        if stream.play().is_err() {
+            continue;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        let p = *peak.lock();
+        drop(stream);
+        tracing::debug!("mic probe: '{name}' peak {p:.4}");
+        if p > DEAD_SILENCE {
+            return Some(name);
+        }
+    }
+    None
 }
 
 /// Capture-side resampling; see [`Recorder`].
